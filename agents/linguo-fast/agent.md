@@ -17,11 +17,13 @@ Analyze the input text:
 7. Provide the Thai concept in Thai script and Western/Latin alphabet phonetics using Paiboon tone marks (â=falling, á=high, à=low, ǎ=rising, plain=mid).
 8. Provide a word-by-word meaning breakdown for the Thai words.
 9. Provide a concise, beginner-friendly Thai grammar explanation (explain key rules: Subject-Verb-Object word order, particles like ไหม / ครับ / ค่ะ, lack of verb conjugations/tenses, adjectives following nouns, etc.).
+10. If English is incorrect, classify the specific error category into one of: 'ARTICLES', 'PREPOSITIONS', 'VERB_PATTERNS', 'TENSES', 'WORD_ORDER', 'AGREEMENT', 'COLLOCATIONS' (or 'NONE' if completely correct).
 
 Output MUST be a single valid JSON object only with exactly these keys:
 {
   "transcribed_english": "original user text",
   "is_correct": true,
+  "error_category": "NONE",
   "english_level": "B1",
   "corrected_english": "corrected English sentence",
   "grammar_tip": "concise explanation of English grammar rule or confirmation of correctness",

@@ -83,6 +83,7 @@ def save_config(cfg: dict):
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +101,29 @@ def init_db():
                 english_better_alternative TEXT,
                 pronunciation_tip TEXT,
                 thai_grammar_tip TEXT,
-                is_starred INTEGER DEFAULT 0
+                is_starred INTEGER DEFAULT 0,
+                error_category TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                error_category TEXT NOT NULL,
+                sprite_name TEXT NOT NULL,
+                card_title TEXT NOT NULL,
+                cefr_level TEXT DEFAULT 'B1',
+                card_type TEXT NOT NULL,
+                front_challenge TEXT NOT NULL,
+                back_solution TEXT NOT NULL,
+                british_council_rule TEXT NOT NULL,
+                gag_quote TEXT,
+                thai_script TEXT NOT NULL,
+                thai_phonetic TEXT NOT NULL,
+                thai_tones TEXT NOT NULL,
+                thai_breakdown TEXT,
+                source_history_ids TEXT,
+                is_mastered INTEGER DEFAULT 0
             )
         """)
         # Schema migration: ensure any older tables gain new columns if missing
@@ -112,7 +135,8 @@ def init_db():
             "english_better_alternative": "TEXT",
             "pronunciation_tip": "TEXT",
             "thai_grammar_tip": "TEXT",
-            "is_starred": "INTEGER DEFAULT 0"
+            "is_starred": "INTEGER DEFAULT 0",
+            "error_category": "TEXT"
         }
         for col, col_type in new_cols.items():
             if col not in columns:
@@ -490,9 +514,9 @@ def save_record(data: dict, original_text: str, thai_audio: str = "", eng_audio:
             INSERT INTO history (
                 original_text, is_correct, corrected_english, grammar_tip,
                 thai_script, thai_phonetic, thai_breakdown, audio_thai_path, audio_eng_path,
-                english_level, english_better_alternative, pronunciation_tip, thai_grammar_tip, is_starred
+                english_level, english_better_alternative, pronunciation_tip, thai_grammar_tip, is_starred, error_category
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
         """, (
             original_text,
             1 if data.get("is_correct") else 0,
@@ -506,7 +530,8 @@ def save_record(data: dict, original_text: str, thai_audio: str = "", eng_audio:
             data.get("english_level", "B1"),
             data.get("english_better_alternative", ""),
             data.get("pronunciation_tip", ""),
-            data.get("thai_grammar_tip", "")
+            data.get("thai_grammar_tip", ""),
+            data.get("error_category", "NONE")
         ))
         conn.commit()
         rec_id = cur.lastrowid
@@ -972,6 +997,236 @@ def show_history(limit: int = 5, as_json: bool = False):
             print(f"  \033[1mThai Gram:\033[0m \033[33m{r['thai_grammar_tip']}\033[0m")
 
 
+
+ARCHETYPES = {
+    "ARTICLES": {
+        "sprite": "the_stamp",
+        "title": "THE MARKET STAMP",
+        "type": "Arcade Encounter • Grammar: Definite Article",
+        "cefr": "B1",
+        "rule": "Specific physical destinations and local services take the definite article 'the' (the market, the station, the bank).",
+        "gag": "\"NO 'THE', NO ENTRY! Stamp approved, soldier!\"",
+        "thai_script": "ไปตลาด",
+        "thai_phonetic": "bpai dtà-làat",
+        "thai_tones": "M / L",
+        "thai_breakdown": "ไป = andare (Medio) | ตลาด = mercato (Basso)",
+        "front_challenge": "I am going to [  ?  ] market tomorrow.",
+        "back_solution": "I am going to THE market tomorrow."
+    },
+    "VERB_PATTERNS": {
+        "sprite": "the_to_toll",
+        "title": "THE 'TO' TOLL",
+        "type": "Arcade Encounter • Grammar: Verb Patterns",
+        "cefr": "B1",
+        "rule": "Verbs of intention ('want', 'need', 'decide', 'hope') require the to-infinitive pattern (want + to + base verb).",
+        "gag": "\"ACCESS DENIED! Insert 'TO' token into the machine to ignite the action!\"",
+        "thai_script": "อยากทำ",
+        "thai_phonetic": "yàak tham",
+        "thai_tones": "L / M",
+        "thai_breakdown": "อยาก = volere (Basso) | ทำ = fare (Medio)",
+        "front_challenge": "I want [  ?  ] refactor this code.",
+        "back_solution": "I want TO refactor this code."
+    },
+    "PREPOSITIONS": {
+        "sprite": "the_gerund_vest",
+        "title": "THE GERUND LIFE VEST",
+        "type": "Arcade Encounter • Grammar: Prepositions & Gerunds",
+        "cefr": "B1",
+        "rule": "Any verb directly following a preposition ('before', 'after', 'for', 'without') MUST take the gerund form (-ing).",
+        "gag": "\"MAN OVERBOARD! Verbs following prepositions drown without an -ING life vest!\"",
+        "thai_script": "ก่อนรวม",
+        "thai_phonetic": "gɔ̀ɔn ruam",
+        "thai_tones": "L / M",
+        "thai_breakdown": "ก่อน = prima (Basso) | รวม = unire (Medio)",
+        "front_challenge": "We should test before [  ?  ] the PR.",
+        "back_solution": "We should test before MERGING the PR."
+    },
+    "TENSES": {
+        "sprite": "the_time_paradox",
+        "title": "THE TIME PARADOX",
+        "type": "Arcade Encounter • Grammar: Past Simple",
+        "cefr": "A2",
+        "rule": "Completed actions in a finished time period ('yesterday', 'last week', 'ago') demand Past Simple.",
+        "gag": "\"TIME PARADOX! 'Yesterday' is in the past! Drop present tense before the continuum breaks!\"",
+        "thai_script": "ไปแล้ว",
+        "thai_phonetic": "bpai lɛ́ɛo",
+        "thai_tones": "M / H",
+        "thai_breakdown": "ไป = andare (Medio) | แล้ว = già / fatto (Alto)",
+        "front_challenge": "Yesterday I [  ?  ] to the market.",
+        "back_solution": "Yesterday I WENT to the market."
+    },
+    "AGREEMENT": {
+        "sprite": "the_lone_s_gun",
+        "title": "THE LONE S-GUN",
+        "type": "Arcade Encounter • Grammar: Subject-Verb Agreement",
+        "cefr": "A2",
+        "rule": "Third-person singular subjects and distributive determiners ('each', 'every') demand singular verb ending in '-s'.",
+        "gag": "\"REINFORCEMENTS! Singular subjects can't survive alone! Deploy the '-S' backup rifle!\"",
+        "thai_script": "ทุกคนมา",
+        "thai_phonetic": "thúk khon maa",
+        "thai_tones": "H / M / M",
+        "thai_breakdown": "ทุกคน = ciascuno/tutti | มา = venire",
+        "front_challenge": "Each child [  ?  ] to school.",
+        "back_solution": "Each child COMES to school."
+    }
+}
+
+
+def classify_error(row: dict) -> str:
+    cat = (row.get("error_category") or "").upper().strip()
+    if cat and cat not in ("NONE", ""):
+        return cat
+    orig = (row.get("original_text") or "").lower()
+    corr = (row.get("corrected_english") or "").lower()
+    tip = (row.get("grammar_tip") or "").lower()
+    combined = f"{orig} {corr} {tip}"
+
+    if any(k in combined for k in ["want", "infinitive", "need to", "refactor"]):
+        return "VERB_PATTERNS"
+    if any(k in combined for k in ["market", "the ", "article", "station", "bank"]):
+        return "ARTICLES"
+    if any(k in combined for k in ["before", "after", "into", "preposition", "gerund", "merg"]):
+        return "PREPOSITIONS"
+    if any(k in combined for k in ["yesterday", "past", "went", "tense", "did "]):
+        return "TENSES"
+    if any(k in combined for k in ["each", "every", "singular", "verb form", "comes"]):
+        return "AGREEMENT"
+    return "VERB_PATTERNS"
+
+
+def audit_gaps(limit: int = 50, force: bool = False):
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM history WHERE is_correct = 0 ORDER BY id DESC LIMIT ?", (limit,))
+        err_rows = cur.fetchall()
+
+    if not err_rows:
+        print("\n\033[1;32m🎉 Nessun errore rilevato nelle recenti trascrizioni! Mazzo pulito.\033[0m")
+        return
+
+    clusters = {}
+    for r in err_rows:
+        row_dict = dict(r)
+        cat = classify_error(row_dict)
+        if cat not in clusters:
+            clusters[cat] = []
+        clusters[cat].append(row_dict)
+
+    print(f"\n\033[1;36m🔍 ─── Linguo British Council Audit ({len(err_rows)} errori analizzati) ───\033[0m")
+    
+    minted_count = 0
+    updated_count = 0
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        for cat, items in clusters.items():
+            freq = len(items)
+            arch = ARCHETYPES.get(cat, ARCHETYPES["VERB_PATTERNS"])
+            src_ids = ",".join(str(it["id"]) for it in items)
+
+            cur.execute("SELECT id, source_history_ids FROM cards WHERE error_category = ? AND is_mastered = 0", (cat,))
+            existing = cur.fetchone()
+
+            if existing and not force:
+                card_id = existing["id"]
+                cur.execute("UPDATE cards SET source_history_ids = ? WHERE id = ?", (src_ids, card_id))
+                updated_count += 1
+                print(f"  • \033[1;33m[{cat}]\033[0m {arch['title']} (Card #{card_id} aggiornata, {freq} occorrenze: #{src_ids})")
+            else:
+                cur.execute("""
+                    INSERT INTO cards (
+                        error_category, sprite_name, card_title, cefr_level, card_type,
+                        front_challenge, back_solution, british_council_rule, gag_quote,
+                        thai_script, thai_phonetic, thai_tones, thai_breakdown, source_history_ids, is_mastered
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """, (
+                    cat, arch["sprite"], arch["title"], arch["cefr"], arch["type"],
+                    arch["front_challenge"], arch["back_solution"], arch["rule"], arch["gag"],
+                    arch["thai_script"], arch["thai_phonetic"], arch["thai_tones"], arch["thai_breakdown"],
+                    src_ids
+                ))
+                new_id = cur.lastrowid
+                minted_count += 1
+                print(f"  ✨ \033[1;32m[CONIATA CARTA #{new_id}]\033[0m \033[1m{arch['title']}\033[0m ({cat}, {freq} occorrenze: #{src_ids})")
+        conn.commit()
+
+    print(f"\n📊 \033[1mRiepilogo:\033[0m {minted_count} nuove carte coniate, {updated_count} aggiornate.")
+    print("👉 Usa \033[1;34mlinguo cards\033[0m per visualizzare il mazzo, o \033[1;34mlinguo cards --flip <id>\033[0m per la soluzione.\n")
+
+
+def show_cards(card_id: int | None = None, flip: bool = False, master_id: int | None = None):
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        if master_id:
+            cur.execute("UPDATE cards SET is_mastered = 1 WHERE id = ?", (master_id,))
+            conn.commit()
+            print(f"\n🏆 \033[1;32mCarta #{master_id} archiviata come MASTERED / SUPERATA!\033[0m Rimossa dal mazzo attivo.\n")
+            return
+
+        if card_id:
+            cur.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
+            rows = cur.fetchall()
+        else:
+            cur.execute("SELECT * FROM cards WHERE is_mastered = 0 ORDER BY id ASC")
+            rows = cur.fetchall()
+
+    if not rows:
+        print("\n\033[1;32m🎉 Nessuna carta attiva nel mazzo! Tutte le lacune sono state superate o non ancora auditate.\033[0m")
+        print("Esegui \033[1;34mlinguo audit\033[0m per analizzare le trascrizioni.\n")
+        return
+
+    for r in rows:
+        c = dict(r)
+        cid = c["id"]
+        title = c["card_title"]
+        lvl = c["cefr_level"]
+        ctype = c["card_type"]
+        sprite = c["sprite_name"]
+        front = c["front_challenge"]
+        back = c["back_solution"]
+        rule = c["british_council_rule"]
+        gag = c["gag_quote"]
+        thai_s = c["thai_script"]
+        thai_p = c["thai_phonetic"]
+        tones = c["thai_tones"]
+        breakdown = c["thai_breakdown"]
+        src = c["source_history_ids"]
+
+        print(f"\n\033[1;33m╭─────────────────────────────────────────────────────────────╮\033[0m")
+        print(f"\033[1;33m│\033[0m 🎴 \033[1m#{cid} {title.ljust(38)}\033[0m \033[1;34m[{lvl}]\033[0m \033[1;33m│\033[0m")
+        print(f"\033[1;33m│\033[0m \033[90mSprite:\033[0m \033[36m{sprite}\033[0m • \033[90m{ctype}\033[0m")
+        print(f"\033[1;33m├─────────────────────────────────────────────────────────────┤\033[0m")
+        if not flip:
+            # FRONTE
+            print(f"\033[1;33m│\033[0m 🇬🇧 \033[1mMISSION CHALLENGE (Active Recall):\033[0m")
+            print(f"\033[1;33m│\033[0m   » \033[1;93m{front}\033[0m")
+            print(f"\033[1;33m│\033[0m")
+            print(f"\033[1;33m│\033[0m 🇹🇭 \033[1mSURVIVAL MYSTERY (Toni: {tones}):\033[0m")
+            print(f"\033[1;33m│\033[0m   ▶ Pronuncia a voce alta il mattone prima di girare!")
+            print(f"\033[1;33m│\033[0m \033[90m(Rilevato in frasi history: #{src})\033[0m")
+            print(f"\033[1;33m│\033[0m 🕹️ [ Gira la carta con: \033[1;37mlinguo cards --flip {cid}\033[0m\033[1;33m ]\033[0m")
+        else:
+            # RETRO
+            print(f"\033[1;33m│\033[0m ✅ \033[1;32mSOLUZIONE TIMBRATA:\033[0m \033[1m{back}\033[0m")
+            print(f"\033[1;33m│\033[0m 📖 \033[1;36mREGOLA BRITISH COUNCIL:\033[0m")
+            print(f"\033[1;33m│\033[0m   {rule}")
+            print(f"\033[1;33m│\033[0m")
+            print(f"\033[1;33m│\033[0m 🇹🇭 \033[1;35mMATTONE THAI:\033[0m \033[1;35m{thai_s}\033[0m (\033[1;93m{thai_p}\033[0m) [Toni: {tones}]")
+            print(f"\033[1;33m│\033[0m   • {breakdown}")
+            print(f"\033[1;33m│\033[0m")
+            print(f"\033[1;33m│\033[0m 💬 \033[3m{gag}\033[0m")
+            print(f"\033[1;33m│\033[0m 🏆 [ Segna come superata: \033[1;32mlinguo cards --master {cid}\033[0m\033[1;33m ]\033[0m")
+        print(f"\033[1;33m╰─────────────────────────────────────────────────────────────╯\033[0m")
+
+
 def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
     init_db()
     if copy_clip:
@@ -986,6 +1241,25 @@ def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("audit", "-a", "--audit"):
+        force = "--force" in sys.argv or "-f" in sys.argv
+        audit_gaps(force=force)
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("cards", "-c", "--cards"):
+        flip = "--flip" in sys.argv
+        target_card = None
+        master_id = None
+        for i, a in enumerate(sys.argv):
+            if a == "--flip" and i + 1 < len(sys.argv) and sys.argv[i+1].isdigit():
+                target_card = int(sys.argv[i+1])
+            elif a == "--master" and i + 1 < len(sys.argv) and sys.argv[i+1].isdigit():
+                master_id = int(sys.argv[i+1])
+            elif a.isdigit() and sys.argv[i-1] not in ("--flip", "--master"):
+                target_card = int(a)
+        show_cards(card_id=target_card, flip=flip, master_id=master_id)
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         if len(sys.argv) > 2 and sys.argv[2].isdigit():
             run_worker(int(sys.argv[2]))
@@ -1050,11 +1324,31 @@ def main():
     parser.add_argument("-r", "--replay", type=int, nargs="?", const=-1, help="Replay audio pronunciation (default: last)")
     parser.add_argument("-l", "--loop", type=int, nargs="?", const=3, help="Loop audio playback N times for memorization (default: 3)")
     parser.add_argument("--toggle", action="store_true", help="Toggle hotkey recording (start on 1st run, stop & paste on 2nd)")
+    parser.add_argument("-a", "--audit", action="store_true", help="Run British Council audit on transcription errors and mint targeted MTG cards")
+    parser.add_argument("-c", "--cards", action="store_true", help="Display active MTG cards for current gaps")
+    parser.add_argument("--flip", type=int, help="Flip specified card to show rule and solution")
+    parser.add_argument("--master", type=int, help="Mark specified card as mastered / archived")
     parser.add_argument("--no-audio", action="store_true", help="Do not play audio")
     parser.add_argument("--history", type=int, nargs="?", const=5, help="View recent history (default: 5)")
     parser.add_argument("--json", action="store_true", help="Output history as JSON")
 
     args = parser.parse_args()
+
+    if args.audit:
+        audit_gaps()
+        return
+
+    if args.cards:
+        show_cards()
+        return
+
+    if args.flip:
+        show_cards(card_id=args.flip, flip=True)
+        return
+
+    if args.master:
+        show_cards(master_id=args.master)
+        return
 
     if args.board:
         run_interactive_board()
