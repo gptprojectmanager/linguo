@@ -196,30 +196,61 @@ Un punteggio del 100% in ingegneria del software è pura propaganda. Questa arch
 ## 6. Proposte Tecniche di Mitigazione per le WEAKNESSES
 
 ### W1: Il Thai dipende da Edge-TTS (Internet) e il fallback Mac è robotico
-* **Mitigazione KISS Immediata**: Smart Pre-Caching Locale dei mattoni di sopravvivenza. Il vocabolario A0/A1 per il Thai conta ~300 mattoni. Un job in background pre-sintetizza una volta sola i 300 audio con Edge-TTS (`Premwadee`) in `~/.local/share/linguo/cache/thai/`. In aereo o offline, il tasso di cache-hit è > 85%.
-* **Soluzione Definitiva 100% Offline**: Integrazione di **Sherpa-ONNX con modello VITS-Thai** (`PyThaiNLP/thaitts-onnx` o `vits-mms-tha`). Pesa ~50 MB, richiede < 80 MB di RAM su 1 core CPU, ed è l'equivalente esatto di Kokoro per il Thai. Possiede binding nativi in C e Rust (`sherpa-rs`).
+* **Mitigazione KISS Immediata (Smart Pre-Caching)**:
+  * Il vocabolario A0/A1 di pura sopravvivenza per il Thai conta ~300 mattoni (cibo, direzioni, emergenze, numeri).
+  * Un cron/script background pre-sintetizza una volta sola i 300 file audio con Edge-TTS (`th-TH-PremwadeeNeural`, rate `-20%`) salvandoli in `~/.local/share/linguo/cache/thai/`.
+  * Quando la macchina è offline (aereo, assenza di segnale), il worker cerca prima l'hash del testo nella cache: il tasso di hit offline per frasi di sopravvivenza è **> 85%**.
+* **Soluzione Definitiva 100% Offline (Sherpa-ONNX + VITS Thai)**:
+  * Integrazione del modello **`csukuangfj/vits-mms-tha`** o **`PyThaiNLP/thaitts-onnx`** tramite `sherpa-onnx`.
+  * Pesa solo **~50 MB**, occupa **< 80 MB di RAM** su 1 core CPU ed esegue in locale in <80 ms.
+  * Dispone di binding nativi C e Rust (`sherpa-rs`), permettendo al binario Rust `dash-gui` di sintetizzare il Thai localmente senza invocare Python né Internet.
+* **Ammorbidimento Fallback macOS `say`**:
+  * In caso di degradazione su `say -v Kanya`, viene applicato un filtro audio ffmpeg (`aresample=24000, equalizer=f=1000:t=q:w=1:g=-3`) per attenuare il clipping metallico della voce di sistema.
 
 ### W2: Il clustering degli errori attuale è euristico su 5 archetipi
-* **Mitigazione KISS**: Architettura Ibrida Euristica + Fallback Mini-Batch LLM. L'euristica locale classifica all'istante l'85% degli errori standard a zero token. Se una frase presenta un errore non catalogato, durante `linguo audit` viene inviato solo l'elenco non classificato in una micro-chiamata batch LLM (~70 token) per coniare il nuovo archetipo.
-* **Registro Dinamico**: Tabella SQLite `archetypes` per registrare dinamicamente nuovi sprite e regole senza modificare il codice sorgente Python.
+* **Mitigazione KISS (Architettura Ibrida Euristica + Fallback Mini-Batch LLM)**:
+  * L'euristica locale analizza all'istante l'85% degli errori standard a zero token e zero latenza (`ARTICLES`, `VERB_PATTERNS`, `PREPOSITIONS`, `TENSES`, `AGREEMENT`).
+  * Se una frase presenta un errore non catalogato (es. phrasal verbs complessi, false friends, idiomi), viene marcata come `UNCLASSIFIED`.
+  * Durante `linguo audit`, solo queste poche frasi non catalogate vengono inviate in **una singola micro-chiamata batch LLM** (~70 token) con prompt mirato:
+    ```json
+    { "task": "cluster_unclassified", "errors": ["..."], "output": "arcade_archetype_proposal" }
+    ```
+* **Registro Dinamico su SQLite**:
+  * Tabella `card_archetypes` in `history.db` per salvare dinamicamente nuovi sprite e archetipi generati, senza necessità di ricompilare o toccare il codice Python.
 
 ### W3: Toolchain Rust da configurare per Dear ImGui (`imgui-rs`)
-* **Mitigazione KISS**: Script `build_gui.sh` che compila una tantum con `cargo build --release` e copia il binario statico (pesa ~9 MB, zero dipendenze runtime) in `~/.local/bin/linguo-gui`.
-* **Bridge Immediato**: La TUI terminale `linguo board` (`lb`) in `curses` è già attiva e utilizzabile al 100% su qualsiasi Mac senza compilare alcun crate.
+* **Mitigazione KISS (Single-Binary Build Script)**:
+  * Script automatizzato `install_gui.sh`:
+    ```bash
+    cargo build --release --manifest-path gui/dash-gui/Cargo.toml
+    cp gui/dash-gui/target/release/dash-gui ~/.local/bin/linguo-gui
+    ```
+  * Il file risultante è un singolo binario ELF/Mach-O statico di ~9 MB con zero dipendenze esterne.
+* **Bridge TUI Immediato**:
+  * La TUI terminale `linguo board` (`lb`) in `curses` è già attiva e funzionante al 100% su qualsiasi macOS senza compilare nulla.
 
 ---
 
 ## 7. Proposte di Sviluppo per le OPPORTUNITIES
 
 ### O1: Spaced Repetition (SR) e "Auto-Mastery" Passiva (Zero Sforzo ADHD)
-* Le app tradizionali (Anki) impongono il click manuale *"Difficile / Buono / Facile"*, generando noia e drop-off.
-* In Linguo, è l'audit che osserva le trascrizioni reali: se l'utente usa la struttura target correttamente per 3 volte consecutive in giorni diversi, la carta viene promossa automaticamente a `is_mastered = 1` con banner arcade. Se si recidiva, torna attiva in cima al mazzo.
+* **Eliminazione del Click Manuale**: Le app come Anki falliscono per gli utenti ADHD a causa dell'attrito di dover valutare manualmente *"Difficile / Buono / Facile"*.
+* **Algoritmo di Prestazione Reale**:
+  * L'audit monitora le trascrizioni vocali successive nei giorni a venire.
+  * Se l'utente usa la struttura corretta per **3 sessioni consecutive** (es. 3 frasi con `the + luogo` senza errori), la carta corrispondente (`THE MARKET STAMP`) viene promossa in automatico a `is_mastered = 1`.
+  * Banner arcade a terminale / GUI: `🏆 ACHIEVEMENT UNLOCKED: DEFINITE ARTICLE MASTERED!`.
+  * Se a distanza di settimane l'errore ricompare in due trascrizioni, la carta viene riattivata automaticamente in cima al deck.
 
 ### O2: Esportazione Istantanea su Anki Mobile (`.apkg` / CSV)
-* Comando `linguo export --anki` che impacchetta le carte coniate, le regole British Council, le gag arcade e gli audio MP3 locali per il ripasso dallo smartphone nei momenti morti.
+* Comando `linguo export --anki`:
+  * Genera un deck Anki importabile su iOS / Android con Fronte (puzzle), Retro (soluzione, regola British Council, gag comica) e gli audio MP3 nativi già inclusi. Ideale per il ripasso rapido sui mezzi pubblici o offline.
 
 ### O3: Floating Native Desktop HUD su macOS Monterey
-* Finestra borderless semi-trasparente controllata da hotkey globale (`Cmd+Shift+L`). Appare in sovrimpressione, gira la carta con `[Spazio]`, suona l'audio con `[r]`, scompare con `[Esc]`. Consumo CPU a riposo: 0.0%, memoria: 15 MB.
+* Finestra borderless semi-trasparente sempre in sovrimpressione, pilotata da global hotkey (`Cmd+Shift+L` via `rdev` o carbon event handler):
+  * `[Space]`: flip della card Fronte / Retro.
+  * `[r]`: replay istantaneo pronuncia (Kokoro 0.8x / Premwadee).
+  * `[m]`: toggle stato mastered.
+  * Consumo CPU a riposo: **0.0%** (loop basato su eventi/wait-events anziché polling continuo). Memoria: **~15 MB**.
 
 ---
 
@@ -227,26 +258,52 @@ Un punteggio del 100% in ingegneria del software è pura propaganda. Questa arch
 
 ### T1: Blocco o Rate-Limiting dell'endpoint Edge-TTS (Microsoft)
 * **Pipeline a 3 Livelli (Graceful Degradation)**:
-  1. *Tier 1*: Cache locale su disco (`~/.local/share/linguo/cache/thai/`).
-  2. *Tier 2*: Fallback automatico su Sherpa-ONNX locale se Edge-TTS va in timeout (> 2.5s) o fallisce.
-  3. *Tier 3*: Fallback su macOS `say -v Kanya` per garantire che l'audio non manchi mai.
+  ```
+  [Richiesta Audio Thai]
+           │
+           ▼
+    1. Cache Locale Disk (~/.local/share/linguo/cache/thai/)
+           │ (se miss)
+           ▼
+    2. Edge-TTS WebSocket (timeout 2.5s)
+           │ (se timeout / HTTP 401/403)
+           ▼
+    3. Sherpa-ONNX Locale (vits-mms-tha, 100% offline)
+           │ (se modello non scaricato)
+           ▼
+    4. macOS say -v Kanya (fallback di sicurezza assoluto)
+  ```
 
 ### T2: Permessi macOS TCC (Microfono e AppleScript Cmd+V)
-* **Comando Diagnostico `linguo doctor`**: Verifica autorizzazioni ad `avfoundation` e System Events; stampa l'URL diretto `x-apple.systempreferences:` in caso di revoca.
-* **Codesigning Fisso**: Firma ad-hoc del binario (`codesign -s - --force ~/.local/bin/linguo`) per evitare che macOS tratti l'app come sconosciuta dopo ogni aggiornamento.
-* **Appunti di Sistema (`pbcopy`)**: Il testo corretto è sempre al sicuro nella clipboard, indipendentemente dall'auto-incolla.
+* **Comando Diagnostico `linguo doctor`**:
+  * Verifica lo stato di autorizzazione per `avfoundation` (accesso mic) e `System Events` (accessibilità keystroke).
+  * In caso di permessi mancanti, stampa il comando one-click per aprire le impostazioni esatte:
+    ```bash
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    ```
+* **Codesigning Fisso Ad-Hoc**:
+  ```bash
+  codesign -s - --force ~/.local/bin/linguo
+  ```
+  Evita che gli aggiornamenti minori facciano revocare i privilegi di sicurezza da parte di Gatekeeper.
+* **Clipboard Primaria**: Il testo corretto viene sempre depositato negli appunti (`pbcopy`), garantendo che anche se l'auto-incolla fosse bloccato, il testo è immediatamente pronto con `Cmd+V`.
 
 ### T3: Obsolescenza o Disallineamento dei Binding `imgui-rs` in Rust
-* **Disaccoppiamento Totale**: `dash-core` comunica con il frontend unicamente via SQLite WAL. Se `imgui-rs` dovesse creare attriti, il client può essere sostituito all'istante con C++ Dear ImGui nativo, `egui` (100% Rust puro WGPU), o la TUI `lb`, senza toccare una sola riga del motore vocale.
-* **Dependency Pinning**: Versioni congelate in `Cargo.lock`.
+* **Disaccoppiamento Totale tramite SQLite WAL**:
+  * Il motore `dash-core` (Python) non ha alcuna dipendenza o riferimento alla GUI.
+  * Se `imgui-rs` dovesse creare attriti in futuro con le nuove versioni di macOS, il frontend può essere sostituito a costo zero con:
+    1. C++ Dear ImGui nativo (`imgui.cpp` con Metal).
+    2. `egui` (100% Rust puro WGPU, zero C++).
+    3. Terminal Curses TUI `lb` (già pronta e zero dipendenze).
+* **Dependency Locking**: Versioni dei crate congelate in `Cargo.lock`.
 
 ### T4: Drift Semantico dell'LLM / JSON Corrotto ➔ **Risolto con Pydantic v2**
-* **Implementazione Attiva**: Adozione di **Pydantic 2.11.7 (core compilato in Rust)** nel file `bin/linguo`.
-* **Garanzie di Tipo e Auto-Healing**:
-  * `Literal["ARTICLES", "PREPOSITIONS", "VERB_PATTERNS", ...]` con `@field_validator` per normalizzare allucinazioni semantiche dell'LLM.
-  * Valori di default automatici per prevenire `KeyError` e `NoneType`.
-  * Tempo di validazione schema: **< 0.05 ms** su CPU.
-  * Perfetto allineamento 1:1 con i `struct` Rust di `dash-gui`.
+* **Implementazione Attiva in `bin/linguo`**:
+  * Utilizzo di **Pydantic 2.11.7 (core Rust `pydantic-core`)**.
+  * Modello `LinguoAnalysis` con tipi rigidi e validatore `@field_validator("error_category", mode="before")` per normalizzare allucinazioni semantiche in tempo reale.
+  * Deserializzazione sicura via `LinguoAnalysis.model_validate_json(raw_text)` con fallback deterministico.
+  * Latenza di validazione: **< 0.05 ms**.
+  * Allineamento 1:1 con i campi dei `struct` Rust di `dash-gui`.
 
 ---
 
