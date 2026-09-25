@@ -53,8 +53,9 @@ DEFAULT_CONFIG = {
     "auto_paste": True,
     "sound_feedback": True,
     "tts_engine": "hybrid",  # "hybrid" = Kokoro-82M (English local, 1-core) + Edge-TTS (Thai studio)
-    "eng_voice": "af_heart", # Kokoro voice (af_heart, af_bella, am_adam, etc.)
+    "eng_voice": "af_nicole", # Warm velvety Kokoro voice
     "thai_voice": "th-TH-PremwadeeNeural", # Edge-TTS Thai voice
+    "speed": 0.8,            # 0.8x playback speed for clear didactic articulation
     "notifications": True,
     "model": "gemini-3.6-flash-low"
 }
@@ -282,6 +283,9 @@ def run_worker(record_id: int):
 
     cfg = load_config()
     tts_engine = cfg.get("tts_engine", "hybrid")
+    speed = float(cfg.get("speed", 0.8))
+    rate_percent = int((speed - 1.0) * 100)
+    rate_str = f"{rate_percent:+d}%" if rate_percent != 0 else "+0%"
     ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
 
     eng_file = AUDIO_DIR / f"eng_{record_id}.mp3"
@@ -301,10 +305,10 @@ def run_worker(record_id: int):
                 import numpy as np
 
                 pipeline = KPipeline(lang_code='a')
-                voice = cfg.get("eng_voice", "af_heart")
+                voice = cfg.get("eng_voice", "af_nicole")
                 if not voice or voice in ("Samantha", "Alex", "Victoria"):
-                    voice = "af_heart"
-                generator = pipeline(eng_text, voice=voice, speed=1)
+                    voice = "af_nicole"
+                generator = pipeline(eng_text, voice=voice, speed=speed)
                 audio_chunks = [audio for _, _, audio in generator]
                 if audio_chunks:
                     tmp_wav = AUDIO_DIR / f"eng_tmp_{record_id}.wav"
@@ -322,6 +326,7 @@ def run_worker(record_id: int):
                 subprocess.run([
                     "edge-tts",
                     "--voice", v,
+                    f"--rate={rate_str}",
                     "--text", eng_text,
                     "--write-media", str(eng_file)
                 ], capture_output=True, timeout=8.0, check=True)
@@ -332,8 +337,9 @@ def run_worker(record_id: int):
         # Final fallback to local say
         if not eng_ok:
             try:
+                say_rate = str(int(175 * speed))
                 tmp_aiff = AUDIO_DIR / f"eng_tmp_{record_id}.aiff"
-                subprocess.run(["say", "-v", "Samantha", eng_text, "-o", str(tmp_aiff)], timeout=5.0)
+                subprocess.run(["say", "-v", "Samantha", "-r", say_rate, eng_text, "-o", str(tmp_aiff)], timeout=5.0)
                 if tmp_aiff.exists():
                     subprocess.run([ffmpeg_bin, "-i", str(tmp_aiff), "-y", str(eng_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     tmp_aiff.unlink(missing_ok=True)
@@ -351,6 +357,7 @@ def run_worker(record_id: int):
                 subprocess.run([
                     "edge-tts",
                     "--voice", v,
+                    f"--rate={rate_str}",
                     "--text", thai_text,
                     "--write-media", str(thai_file)
                 ], capture_output=True, timeout=8.0, check=True)
@@ -361,8 +368,9 @@ def run_worker(record_id: int):
         # Fallback to local say
         if not thai_ok:
             try:
+                say_rate = str(int(175 * speed))
                 thai_tmp_aiff = AUDIO_DIR / f"thai_tmp_{record_id}.aiff"
-                subprocess.run(["say", "-v", "Kanya", thai_text, "-o", str(thai_tmp_aiff)], timeout=5.0)
+                subprocess.run(["say", "-v", "Kanya", "-r", say_rate, thai_text, "-o", str(thai_tmp_aiff)], timeout=5.0)
                 if thai_tmp_aiff.exists():
                     subprocess.run([ffmpeg_bin, "-i", str(thai_tmp_aiff), "-filter:a", "volume=2.5", "-y", str(thai_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     thai_tmp_aiff.unlink(missing_ok=True)
