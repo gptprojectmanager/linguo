@@ -1560,7 +1560,15 @@ def run_doctor():
     except Exception:
         pass
 
+    # 8. Rust Native HUD (dash-gui)
+    gui_bin = Path.home() / ".local/bin/linguo-gui"
+    if gui_bin.exists():
+        print(f"  ✅ \033[1mRust MTG HUD (dash-gui):\033[0m Binario nativo Metal pronto ({gui_bin})")
+    else:
+        print("  ⚠️ \033[1mRust MTG HUD (dash-gui):\033[0m Non ancora compilato (esegui ./install_gui.sh)")
+
     print()
+
     if all_ok:
         print("🚀 \033[1;32mTutti i sottosistemi essenziali sono operativi e pronti all'uso!\033[0m\n")
     else:
@@ -1683,11 +1691,13 @@ def main():
     parser.add_argument("-c", "--cards", action="store_true", help="Display active MTG cards for current gaps")
     parser.add_argument("--flip", type=int, help="Flip specified card to show rule and solution")
     parser.add_argument("--master", type=int, help="Mark specified card as mastered / archived")
+    parser.add_argument("-g", "--gui", action="store_true", help="Launch native 16-bit MTG HUD GUI (dash-gui)")
     parser.add_argument("--no-audio", action="store_true", help="Do not play audio")
     parser.add_argument("--history", type=int, nargs="?", const=5, help="View recent history (default: 5)")
     parser.add_argument("--json", action="store_true", help="Output history as JSON")
 
     args = parser.parse_args()
+
 
     if args.doctor:
         run_doctor()
@@ -1720,6 +1730,22 @@ def main():
     if args.board:
         run_interactive_board()
         return
+
+    if args.gui:
+        gui_bin = Path.home() / ".local/bin/linguo-gui"
+        if not gui_bin.exists():
+            repo_installer = Path(__file__).resolve().parent.parent / "install_gui.sh"
+            if repo_installer.exists():
+                print("Compilazione linguo-gui in corso...")
+                subprocess.run([str(repo_installer)])
+        if gui_bin.exists():
+            print("🚀 Avvio Linguo 16-bit MTG HUD...")
+            subprocess.Popen([str(gui_bin)])
+            return
+        else:
+            print("❌ Errore: linguo-gui non trovato. Esegui ./install_gui.sh")
+            return
+
 
     if args.loop is not None:
         replay_audio(loop_count=args.loop)

@@ -24,3 +24,9 @@ workspace/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Rust
+target/
+**/target/
+Cargo.lock
+

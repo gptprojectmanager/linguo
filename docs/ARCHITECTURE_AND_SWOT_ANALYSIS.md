@@ -164,37 +164,36 @@ Un punteggio del 100% in ingegneria del software è pura propaganda. Questa arch
 * [x] Sviluppo del comando `linguo audit`: raggruppa le trascrizioni con errori e conia le carte MTG solo per i gap reali.
 * [x] Sviluppo del comando `linguo cards`: navigazione, visualizzazione Fronte (Active Recall puzzle), Retro (`--flip`) e marcatura superata (`--master`).
 
-### Fase 2: Rust Dear ImGui GUI (`dash-gui`) (IN PIANIFICAZIONE)
-1. **Creazione Crate Rust**:
-   * Directory: `gui/dash-gui`
-   * Dipendenze: `imgui`, `imgui-wgpu` (o `imgui-glium`), `rusqlite` (con feature `bundled`).
-2. **Struttura Dati 1:1**:
-   ```rust
-   pub struct LinguoCard {
-       pub id: i64,
-       pub category: String,
-       pub sprite_name: String,
-       pub title: String,
-       pub cefr: String,
-       pub challenge: String,
-       pub solution: String,
-       pub rule: String,
-       pub gag: String,
-       pub thai_script: String,
-       pub thai_phonetic: String,
-       pub tones: String,
-       pub is_revealed: bool,
-   }
-   ```
-3. **Loop di Rendering e Controlli**:
-   * **`[Space]`**: Gira la carta tra Fronte (puzzle da indovinare) e Retro (soluzione + gag).
-   * **`[r]`**: Chiama in background `linguo replay <source_id>` per riascoltare l'audio a 0.8x.
-   * **`[m]`**: Archivia la carta come padroneggiata.
-   * **`[Left / Right]`**: Naviga tra le carte del mazzo attivo.
+### Fase 2: Rust Native Immediate-Mode HUD (`dash-gui`) (COMPLETATA ✅)
+* [x] **Crate Rust Decoupled**: creato in `gui/dash-gui` con `eframe 0.29` (accelerazione Metal/WGPU nativa su macOS, 0% CPU idle) e `rusqlite` con feature `bundled` (zero dipendenze di sistema).
+* [x] **Font Retro Arcade & Supporto Thai Nativo**: caricamento automatico di `/System/Library/Fonts/Supplemental/Ayuthaya.ttf` (font TrueType di sistema) per renderizzare senza glitch sia il lettering 16-bit che i caratteri della lingua Thai (`ไปตลาด`, ecc.).
+* [x] **Struttura Dati 1:1 `LinguoCard`**: perfettamente allineata allo schema della tabella `cards` in SQLite WAL (`history.db`).
+* [x] **Rendering 16-Bit MTG Trading Card**:
+  - Cornice con doppio bordo dorato (`#DAA520`) e finiture arcade dark navy (`#0D1117`).
+  - Badge sprite tematico (`🎫 THE MARKET STAMP`, `⚓ THE GERUND LIFE VEST`, `🪙 THE 'TO' TOLL`), indicatore tipo (`ITEM • ACTIVE RECALL`) e pill CEFR (`B1`).
+  - **Fronte (Active Recall)**: puzzle con lacuna evidenziata e prompt per stimolare il recupero attivo.
+  - **Retro (Soluzione Cambridge)**: frase corretta in verde neon, regola British Council in box cyan e gag comica in box ambra arcade.
+  - **Mattone Thai Survival (A0)**: script in caratteri grandi, fonetica occidentale, toni vocali e scomposizione morfologica.
+* [x] **Controlli e Hotkey**:
+  - `[Space]`: gira la carta tra Fronte e Retro.
+  - `[A]` o `[Left]`: carta precedente.
+  - `[D]` o `[Right]`: carta successiva.
+  - `[E]`: audio Cambridge/Nicole (Kokoro 0.8x o Samantha).
+  - `[T]` o `[R]`: audio Thai (Edge-TTS Premwadee da smart cache locale offline o Kanya).
+  - `[M]`: marcatura/smarchiatura carta padroneggiata (aggiornamento istantaneo su DB).
+  - `[F5]` o pulsante Reload: ricarica istantanea del mazzo.
+* [x] **Single-Binary Build Script (`install_gui.sh`)**:
+  - Compila con ottimizzazioni `--release` producendo un singolo binario Mach-O statico da 7.0 MB.
+  - Lo installa in `~/.local/bin/linguo-gui` applicando il codesigning ad-hoc per Gatekeeper.
+* [x] **Integrazione CLI Dispatcher**:
+  - Comando `linguo --gui` (o `linguo gui`) per lanciare la HUD nativa direttamente da riga di comando.
+  - Controllo di integrità in `linguo --doctor` (tutti i test verdi).
 
-### Fase 3: Algoritmo di Spaced Repetition e Auto-Mastery
-* Quando l'utente pronuncia frasi in lingua e le successive 5 trascrizioni nella stessa categoria di errore risultano corrette (`is_correct = 1`), il sistema propone automaticamente l'archiviazione della carta.
-* Esportazione del mazzo in formato standard `.apkg` (Anki) o visualizzabile da terminale via `linguo cards`.
+### Fase 3: Algoritmo di Spaced Repetition e Auto-Mastery (COMPLETATA ✅)
+* [x] Algoritmo di Auto-Mastery a streak: quando l'utente pronuncia frasi e le successive 3 trascrizioni nella stessa categoria risultano corrette (`is_correct = 1`), la carta associata viene promossa automaticamente a `is_mastered = 1`.
+* [x] Deck Anki TSV esportabile tramite `linguo export` con campi formattati in HTML (puzzle Fronte, spiegazione Retro e mattoni Thai).
+* [x] Navigazione terminale mazzo tramite `linguo cards`, `linguo cards --flip <id>` e `linguo cards --master <id>`, affiancata dalla TUI curses interattiva `linguo --board` (`lb`) e dal visualizzatore nativo `linguo-gui`.
+
 
 ---
 

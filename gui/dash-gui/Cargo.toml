@@ -1,0 +1,11 @@
+[package]
+name = "dash-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+eframe = { version = "0.29", default-features = true }
+md5 = "0.7"
+
+
