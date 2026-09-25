@@ -26,6 +26,121 @@ import threading
 import time
 from pathlib import Path
 from datetime import datetime
+from typing import Literal, Optional
+
+try:
+    from pydantic import BaseModel, Field, field_validator
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+
+
+if PYDANTIC_AVAILABLE:
+    class LinguoAnalysis(BaseModel):
+        transcribed_english: str = ""
+        is_correct: bool = True
+        error_category: Literal[
+            "ARTICLES", "PREPOSITIONS", "VERB_PATTERNS", "TENSES",
+            "WORD_ORDER", "AGREEMENT", "COLLOCATIONS", "NONE"
+        ] = "NONE"
+        english_level: str = "B1"
+        corrected_english: str = ""
+        grammar_tip: str = ""
+        english_better_alternative: str = ""
+        pronunciation_tip: str = ""
+        thai_concise_script: str = ""
+        thai_phonetic_western: str = ""
+        thai_breakdown: str = ""
+        thai_grammar_tip: str = ""
+
+        @field_validator("error_category", mode="before")
+        @classmethod
+        def sanitize_error_category(cls, v):
+            """Auto-heals LLM hallucinations into strict standard categories."""
+            if not v or not isinstance(v, str):
+                return "NONE"
+            v_upper = v.upper().strip()
+            allowed = {
+                "ARTICLES", "PREPOSITIONS", "VERB_PATTERNS", "TENSES",
+                "WORD_ORDER", "AGREEMENT", "COLLOCATIONS", "NONE"
+            }
+            if v_upper in allowed:
+                return v_upper
+            if "ARTICLE" in v_upper:
+                return "ARTICLES"
+            if "PREP" in v_upper:
+                return "PREPOSITIONS"
+            if "VERB" in v_upper or "INFINITIVE" in v_upper:
+                return "VERB_PATTERNS"
+            if "TENSE" in v_upper or "PAST" in v_upper:
+                return "TENSES"
+            if "AGREE" in v_upper or "SINGULAR" in v_upper:
+                return "AGREEMENT"
+            if "ORDER" in v_upper:
+                return "WORD_ORDER"
+            if "COLLOCAT" in v_upper:
+                return "COLLOCATIONS"
+            return "NONE"
+
+        @field_validator("is_correct", mode="before")
+        @classmethod
+        def sanitize_is_correct(cls, v):
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str):
+                return v.strip().lower() in ("true", "1", "yes")
+            return bool(v)
+
+
+def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict:
+    """Extracts JSON and validates through Pydantic v2 with deterministic fallbacks."""
+    json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    json_str = json_match.group(0) if json_match else raw_text.strip()
+
+    if PYDANTIC_AVAILABLE:
+        try:
+            model = LinguoAnalysis.model_validate_json(json_str)
+            if not model.transcribed_english and fallback_input:
+                model.transcribed_english = fallback_input
+            if not model.corrected_english:
+                model.corrected_english = model.transcribed_english
+            return model.model_dump()
+        except Exception:
+            try:
+                parsed = json.loads(json_str)
+                model = LinguoAnalysis.model_validate(parsed)
+                if not model.transcribed_english and fallback_input:
+                    model.transcribed_english = fallback_input
+                if not model.corrected_english:
+                    model.corrected_english = model.transcribed_english
+                return model.model_dump()
+            except Exception as e:
+                sys.stderr.write(f"Pydantic validation warning: {e}\n")
+
+    try:
+        data = json.loads(json_str)
+        if not data.get("transcribed_english"):
+            data["transcribed_english"] = fallback_input
+        if not data.get("corrected_english"):
+            data["corrected_english"] = data["transcribed_english"]
+        return data
+    except Exception as e:
+        sys.stderr.write(f"JSON decode error: {e}\n")
+        return {
+            "transcribed_english": fallback_input,
+            "is_correct": False,
+            "error_category": "NONE",
+            "english_level": "B1",
+            "corrected_english": fallback_input,
+            "grammar_tip": f"Error parsing AI response: {e}",
+            "english_better_alternative": "",
+            "pronunciation_tip": "",
+            "thai_concise_script": "เกิดข้อผิดพลาด",
+            "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
+            "thai_breakdown": "Error",
+            "thai_grammar_tip": ""
+        }
+
 
 # Ensure user and package paths are always available even when launched by GUI/Shortcuts
 home_local_bin = str(Path.home() / ".local" / "bin")
@@ -219,25 +334,10 @@ def call_agy_coach(text: str) -> dict:
         res = subprocess.run(cmd, cwd=str(WORKSPACE_DIR), capture_output=True, text=True, check=True)
         outer = json.loads(res.stdout)
         raw_response = outer.get("response", "").strip()
-
-        json_match = re.search(r"\{.*\}", raw_response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(0))
-        return json.loads(raw_response)
+        return parse_and_validate_analysis(raw_response, fallback_input=text)
     except Exception as e:
         sys.stderr.write(f"Error calling agy: {e}\n")
-        return {
-            "is_correct": False,
-            "english_level": "B1",
-            "corrected_english": text,
-            "grammar_tip": f"Error during AGY analysis: {e}",
-            "english_better_alternative": "",
-            "pronunciation_tip": "",
-            "thai_concise_script": "เกิดข้อผิดพลาด",
-            "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
-            "thai_breakdown": "Error",
-            "thai_grammar_tip": ""
-        }
+        return parse_and_validate_analysis(f'{{"grammar_tip": "Error calling AGY: {e}", "is_correct": false}}', fallback_input=text)
 
 
 def process_audio_file(audio_path: str) -> dict:
@@ -283,11 +383,7 @@ def process_audio_file(audio_path: str) -> dict:
     ]
     res = subprocess.run(cmd, cwd=str(WORKSPACE_DIR), capture_output=True, text=True)
     raw = res.stdout.strip()
-    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if json_match:
-        return json.loads(json_match.group(0))
-
-    return {}
+    return parse_and_validate_analysis(raw, fallback_input="Voice Recording")
 
 
 def run_worker(record_id: int):
