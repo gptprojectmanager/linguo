@@ -467,9 +467,24 @@ def run_worker(record_id: int):
             except Exception:
                 pass
 
-    # 2. Synthesize Thai Audio (Edge-TTS 48kHz studio quality by default)
+    # 2. Synthesize Thai Audio (Check local cache first, then Edge-TTS, then macOS say)
     if thai_text:
-        if tts_engine in ("hybrid", "edge"):
+        import hashlib
+        import shutil
+
+        thai_cache_dir = DATA_DIR / "cache" / "thai"
+        thai_cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_key = hashlib.md5(f"{thai_text.strip()}_{speed}".encode("utf-8")).hexdigest()
+        cached_file = thai_cache_dir / f"{cache_key}.mp3"
+
+        if cached_file.exists():
+            try:
+                shutil.copyfile(str(cached_file), str(thai_file))
+                thai_ok = thai_file.exists()
+            except Exception:
+                pass
+
+        if not thai_ok and tts_engine in ("hybrid", "edge"):
             try:
                 v = cfg.get("thai_voice", "th-TH-PremwadeeNeural")
                 if not v.startswith("th-"):
@@ -481,18 +496,23 @@ def run_worker(record_id: int):
                     "--text", thai_text,
                     "--write-media", str(thai_file)
                 ], capture_output=True, timeout=8.0, check=True)
-                thai_ok = thai_file.exists()
+                if thai_file.exists():
+                    thai_ok = True
+                    try:
+                        shutil.copyfile(str(thai_file), str(cached_file))
+                    except Exception:
+                        pass
             except Exception as e:
                 sys.stderr.write(f"Edge-TTS Thai failed: {e}\n")
 
-        # Fallback to local say
+        # Fallback to local say with equalizer softening
         if not thai_ok:
             try:
                 say_rate = str(int(175 * speed))
                 thai_tmp_aiff = AUDIO_DIR / f"thai_tmp_{record_id}.aiff"
                 subprocess.run(["say", "-v", "Kanya", "-r", say_rate, thai_text, "-o", str(thai_tmp_aiff)], timeout=5.0)
                 if thai_tmp_aiff.exists():
-                    subprocess.run([ffmpeg_bin, "-i", str(thai_tmp_aiff), "-filter:a", "volume=2.5", "-y", str(thai_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run([ffmpeg_bin, "-i", str(thai_tmp_aiff), "-filter:a", "volume=2.2,aresample=24000", "-y", str(thai_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     thai_tmp_aiff.unlink(missing_ok=True)
                     thai_ok = thai_file.exists()
             except Exception:
@@ -1249,6 +1269,29 @@ def audit_gaps(limit: int = 50, force: bool = False):
                 new_id = cur.lastrowid
                 minted_count += 1
                 print(f"  ✨ \033[1;32m[CONIATA CARTA #{new_id}]\033[0m \033[1m{arch['title']}\033[0m ({cat}, {freq} occorrenze: #{src_ids})")
+
+        # Auto-Mastery Check: promote cards if subsequent transcripts show 3+ clean streak
+        cur.execute("SELECT id, error_category, card_title, created_at FROM cards WHERE is_mastered = 0")
+        active_unmastered = cur.fetchall()
+        for ac in active_unmastered:
+            cid = ac["id"]
+            cat = ac["error_category"]
+            title = ac["card_title"]
+            c_time = ac["created_at"]
+            
+            cur.execute("SELECT is_correct, error_category FROM history WHERE timestamp >= ? ORDER BY id ASC", (c_time,))
+            subs = cur.fetchall()
+            streak = 0
+            for s in subs:
+                if s["is_correct"] == 1:
+                    streak += 1
+                elif s["error_category"] == cat:
+                    streak = 0
+            
+            if streak >= 3:
+                cur.execute("UPDATE cards SET is_mastered = 1 WHERE id = ?", (cid,))
+                print(f"  🏆 \033[1;32m[AUTO-MASTERY]\033[0m Carta #{cid} '{title}' archiviata come superata (streak di {streak} usi corretti)!")
+
         conn.commit()
 
     print(f"\n📊 \033[1mRiepilogo:\033[0m {minted_count} nuove carte coniate, {updated_count} aggiornate.")
@@ -1323,6 +1366,207 @@ def show_cards(card_id: int | None = None, flip: bool = False, master_id: int | 
         print(f"\033[1;33m╰─────────────────────────────────────────────────────────────╯\033[0m")
 
 
+SURVIVAL_THAI_BRICKS = [
+    "ขอบคุณครับ",      # Grazie (M)
+    "สวัสดีครับ",      # Ciao / Buongiorno (M)
+    "เท่าไหร่ครับ",     # Quanto costa?
+    "เช็คบิลด้วยครับ",   # Il conto per favore
+    "ห้องน้ำอยู่ที่ไหน",   # Dov'è il bagno?
+    "ไม่เผ็ด",         # Non piccante
+    "เผ็ดนิดหน่อย",     # Poco piccante
+    "อร่อยมาก",        # Molto buono
+    "น้ำเปล่า",        # Acqua liscia
+    "อยากไป",         # Voglio andare
+    "อยากกิน",        # Voglio mangiare
+    "เข้าใจ",          # Capito
+    "ไม่เข้าใจ",       # Non ho capito
+    "ช่วยด้วย",        # Aiuto!
+    "ไปตลาด",         # Andare al mercato
+    "ขึ้นรถ",          # Salire sull'auto/bus
+    "โรงแรม",         # Hotel
+    "สนามบิน",        # Aeroporto
+    "เลี้ยวซ้าย",      # Gira a sinistra
+    "เลี้ยวขวา",       # Gira a destra
+    "ตรงไป",          # Vai dritto
+]
+
+
+def preseed_thai_cache():
+    """Pre-synthesizes core survival Thai bricks to local disk for 100% offline Frontier quality."""
+    cfg = load_config()
+    speed = float(cfg.get("speed", 0.8))
+    rate_percent = int((speed - 1.0) * 100)
+    rate_str = f"{rate_percent:+d}%" if rate_percent != 0 else "+0%"
+    v = cfg.get("thai_voice", "th-TH-PremwadeeNeural")
+
+    thai_cache_dir = DATA_DIR / "cache" / "thai"
+    thai_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n📦 \033[1;36mPre-caching dei {len(SURVIVAL_THAI_BRICKS)} mattoni Thai essenziali (Edge-TTS {v} @ {speed}x)...\033[0m")
+    cached = 0
+    skipped = 0
+
+    import hashlib
+    for text in SURVIVAL_THAI_BRICKS:
+        cache_key = hashlib.md5(f"{text.strip()}_{speed}".encode("utf-8")).hexdigest()
+        target_file = thai_cache_dir / f"{cache_key}.mp3"
+        if target_file.exists():
+            skipped += 1
+            continue
+        try:
+            subprocess.run([
+                "edge-tts",
+                "--voice", v,
+                f"--rate={rate_str}",
+                "--text", text,
+                "--write-media", str(target_file)
+            ], capture_output=True, timeout=8.0, check=True)
+            if target_file.exists():
+                cached += 1
+                print(f"  ✨ {text}")
+        except Exception as e:
+            sys.stderr.write(f"  ❌ Errore su '{text}': {e}\n")
+
+    print(f"\n🎉 \033[1;32mCompletato:\033[0m {cached} nuovi mattoni memorizzati, {skipped} già presenti.")
+    print(f"📁 Directory cache: \033[90m{thai_cache_dir}\033[0m\n")
+
+
+def export_cards(format_type: str = "anki"):
+    """Exports cards to an Anki-compatible TSV file."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM cards ORDER BY id ASC")
+        rows = cur.fetchall()
+
+    if not rows:
+        print("❌ Nessuna carta da esportare.")
+        return
+
+    import csv
+    export_file = DATA_DIR / "cards_anki_export.tsv"
+    with open(export_file, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerow(["Front_Puzzle", "Back_Explanation", "Thai_Script", "Thai_Phonetics", "Category", "CEFR"])
+        for r in rows:
+            front = f"<b>[{r['card_title']}]</b><br><br>🇬🇧 {r['front_challenge']}<br><br>🇹🇭 {r['thai_tones']}"
+            back = f"<b>✅ {r['back_solution']}</b><br><br>📖 {r['british_council_rule']}<br><br>💬 <i>{r['gag_quote']}</i>"
+            writer.writerow([
+                front,
+                back,
+                r['thai_script'],
+                f"{r['thai_phonetic']} ({r['thai_tones']}) - {r['thai_breakdown']}",
+                r['error_category'],
+                r['cefr_level']
+            ])
+
+    print(f"\n🎴 \033[1;32mEsportate {len(rows)} carte in formato Anki TSV!\033[0m")
+    print(f"📁 File generato: \033[1m{export_file}\033[0m")
+    print("👉 Importalo direttamente in Anki Desktop o AnkiMobile selezionando separatore Tab.\n")
+
+
+def run_doctor():
+    """Diagnostic command to check permissions, speech engines, and system health."""
+    print("\n\033[1;36m🩺 ─── Linguo Doctor: System Health & Permissions Check ───\033[0m\n")
+    all_ok = True
+
+    # 1. Python & Pydantic v2
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if PYDANTIC_AVAILABLE:
+        import pydantic
+        print(f"  ✅ \033[1mPython & Pydantic:\033[0m Python {py_ver}, Pydantic v{pydantic.__version__} (Rust core schema)")
+    else:
+        print(f"  ⚠️ \033[1mPython & Pydantic:\033[0m Python {py_ver}, Pydantic non trovato (fallback json)")
+
+    # 2. SQLite Database & WAL Mode
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode;")
+        journal_mode = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM history;")
+        hist_count = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM cards WHERE is_mastered = 0;")
+        active_cards = cur.fetchone()[0]
+    if journal_mode.lower() == "wal":
+        print(f"  ✅ \033[1mDatabase:\033[0m SQLite WAL mode attivo ({hist_count} frasi, {active_cards} carte attive)")
+    else:
+        print(f"  ⚠️ \033[1mDatabase:\033[0m Journal mode è {journal_mode} (atteso WAL)")
+
+    # 3. Microphone & ffmpeg
+    ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
+    try:
+        res = subprocess.run([ffmpeg_bin, "-version"], capture_output=True, text=True, timeout=2.0)
+        if res.returncode == 0:
+            print(f"  ✅ \033[1mRecording Engine:\033[0m ffmpeg installato ({ffmpeg_bin})")
+        else:
+            print(f"  ❌ \033[1mRecording Engine:\033[0m ffmpeg non risponde")
+            all_ok = False
+    except Exception:
+        print(f"  ❌ \033[1mRecording Engine:\033[0m ffmpeg non trovato nel PATH")
+        all_ok = False
+
+    # Check AVFoundation microphone access
+    try:
+        av_check = subprocess.run([ffmpeg_bin, "-f", "avfoundation", "-list_devices", "true", "-i", '""'], capture_output=True, text=True, timeout=3.0)
+        if "AVFoundation audio devices" in av_check.stderr or "Built-in Microphone" in av_check.stderr:
+            print(f"  ✅ \033[1mmacOS Microphone (TCC):\033[0m Accesso microfono autorizzato")
+        else:
+            print(f"  ⚠️ \033[1mmacOS Microphone (TCC):\033[0m Verifica autorizzazioni in: \033[90mopen \"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone\"\033[0m")
+    except Exception:
+        pass
+
+    # 4. Accessibility & Auto-Paste
+    try:
+        as_check = subprocess.run(["osascript", "-e", 'tell application "System Events" to get name'], capture_output=True, text=True, timeout=3.0)
+        if as_check.returncode == 0:
+            print(f"  ✅ \033[1mmacOS Accessibility:\033[0m System Events autorizzato per auto-paste (Cmd+V)")
+        else:
+            print(f"  ⚠️ \033[1mmacOS Accessibility:\033[0m Permessi mancanti per auto-paste. Abilita in: \033[90mopen \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\"\033[0m")
+    except Exception:
+        pass
+
+    # 5. Kokoro English TTS
+    cfg = load_config()
+    try:
+        import torch
+        from kokoro import KPipeline
+        print(f"  ✅ \033[1mEnglish TTS (Kokoro-82M):\033[0m Disponibile in locale (1 CPU core, voce: {cfg.get('eng_voice', 'af_nicole')}, rate: {cfg.get('speed', 0.8)}x)")
+    except Exception as e:
+        print(f"  ⚠️ \033[1mEnglish TTS (Kokoro-82M):\033[0m Non disponibile ({e}), fallback attivo su macOS say")
+
+    # 6. Edge-TTS Thai & Cache
+    cache_dir = DATA_DIR / "cache" / "thai"
+    cached_count = len(list(cache_dir.glob("*.mp3"))) if cache_dir.exists() else 0
+    try:
+        edge_check = subprocess.run(["edge-tts", "--version"], capture_output=True, text=True, timeout=2.0)
+        if edge_check.returncode == 0:
+            print(f"  ✅ \033[1mThai TTS (Edge-TTS):\033[0m Disponibile (voce: {cfg.get('thai_voice', 'th-TH-PremwadeeNeural')}, cache locale: {cached_count} mattoni)")
+        else:
+            print(f"  ⚠️ \033[1mThai TTS (Edge-TTS):\033[0m edge-tts non risponde, fallback su macOS say (Kanya)")
+    except Exception:
+        print(f"  ⚠️ \033[1mThai TTS (Edge-TTS):\033[0m edge-tts non trovato, fallback su macOS say (Kanya)")
+
+    # 7. macOS say Fallback
+    try:
+        say_kanya = subprocess.run(["say", "-v", "?"], capture_output=True, text=True)
+        has_kanya = "Kanya" in say_kanya.stdout
+        has_sam = "Samantha" in say_kanya.stdout
+        if has_kanya and has_sam:
+            print(f"  ✅ \033[1mmacOS Fallback Voices:\033[0m Voci native 'Samantha' (ENG) e 'Kanya' (THAI) installate")
+        else:
+            print(f"  ⚠️ \033[1mmacOS Fallback Voices:\033[0m Kanya: {has_kanya}, Samantha: {has_sam}")
+    except Exception:
+        pass
+
+    print()
+    if all_ok:
+        print("🚀 \033[1;32mTutti i sottosistemi essenziali sono operativi e pronti all'uso!\033[0m\n")
+    else:
+        print("👉 \033[1;33mSegui le indicazioni sopra per risolvere i punti di attenzione.\033[0m\n")
+
+
 def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
     init_db()
     if copy_clip:
@@ -1337,6 +1581,18 @@ def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("doctor", "--doctor", "-d"):
+        run_doctor()
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("preseed", "cache-thai", "--preseed"):
+        preseed_thai_cache()
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("export", "--export"):
+        export_cards()
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] in ("audit", "-a", "--audit"):
         force = "--force" in sys.argv or "-f" in sys.argv
         audit_gaps(force=force)
@@ -1420,6 +1676,9 @@ def main():
     parser.add_argument("-r", "--replay", type=int, nargs="?", const=-1, help="Replay audio pronunciation (default: last)")
     parser.add_argument("-l", "--loop", type=int, nargs="?", const=3, help="Loop audio playback N times for memorization (default: 3)")
     parser.add_argument("--toggle", action="store_true", help="Toggle hotkey recording (start on 1st run, stop & paste on 2nd)")
+    parser.add_argument("-d", "--doctor", action="store_true", help="Run system diagnostics (permissions, audio engines, WAL)")
+    parser.add_argument("--preseed", action="store_true", help="Pre-cache essential Thai survival audio bricks")
+    parser.add_argument("--export", action="store_true", help="Export cards to Anki-compatible TSV")
     parser.add_argument("-a", "--audit", action="store_true", help="Run British Council audit on transcription errors and mint targeted MTG cards")
     parser.add_argument("-c", "--cards", action="store_true", help="Display active MTG cards for current gaps")
     parser.add_argument("--flip", type=int, help="Flip specified card to show rule and solution")
@@ -1429,6 +1688,18 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output history as JSON")
 
     args = parser.parse_args()
+
+    if args.doctor:
+        run_doctor()
+        return
+
+    if args.preseed:
+        preseed_thai_cache()
+        return
+
+    if args.export:
+        export_cards()
+        return
 
     if args.audit:
         audit_gaps()
