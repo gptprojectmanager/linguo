@@ -1,0 +1,13 @@
+{
+  "hotkey": "<ctrl>+<alt>+<space>",
+  "auto_paste": true,
+  "sound_feedback": true,
+  "tts_engine": "hybrid",
+  "eng_voice": "af_heart",
+  "thai_voice": "th-TH-PremwadeeNeural",
+  "edge_eng_voice": "en-US-JennyNeural",
+  "say_eng_voice": "Samantha",
+  "say_thai_voice": "Kanya",
+  "notifications": true,
+  "model": "gemini-3.6-flash-low"
+}

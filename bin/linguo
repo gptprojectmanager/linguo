@@ -1,0 +1,1085 @@
+#!/usr/bin/env python3
+"""
+Linguo: Dual English-Thai CLI Voice & Language Coach
+- English Grammar Analysis via Antigravity CLI (Flash 3.6 / Gemini)
+- Ultra-concise Thai Translation & Western Phonetic Transliteration (Paiboon tones)
+- CEFR Language Level Assessment (A1-C1) + Grammar Rules + Level-Up Alternative Phrasing
+- Targeted English Phonetics & Pronunciation Coaching (Stress, Silent Letters, Italian traps)
+- Beginner Thai Grammar Explanations (SVO word order, particles, zero conjugation)
+- ADHD Interactive Terminal Board (TUI) in iTerm2 (`lb`) with Active Recall Flashcard Mode
+- Hybrid Speech Synthesis: 100% LOCAL Kokoro-82M on 1 CPU core + Edge-TTS Thai (Studio quality)
+- Completely Asynchronous: Non-blocking text transcription & auto-paste (<0.5s)
+- Star / Favorite system for focused memorization and repetition (`ll`, `lr`)
+- SQLite & Markdown Persistence for human & AI agent review
+- Fast push-to-toggle (Touch Bar, Menu Bar, Global Hotkey) + Auto-Paste + System Notifications
+"""
+
+import sys
+import os
+import re
+import json
+import signal
+import sqlite3
+import argparse
+import subprocess
+import threading
+import time
+from pathlib import Path
+from datetime import datetime
+
+# Ensure user and package paths are always available even when launched by GUI/Shortcuts
+home_local_bin = str(Path.home() / ".local" / "bin")
+current_path = os.environ.get("PATH", "")
+os.environ["PATH"] = f"{home_local_bin}:/opt/local/bin:/usr/local/bin:{current_path}"
+
+DATA_DIR = Path.home() / ".local" / "share" / "linguo"
+AUDIO_DIR = DATA_DIR / "audio"
+DB_PATH = DATA_DIR / "history.db"
+LOG_PATH = DATA_DIR / "history.md"
+CONFIG_PATH = DATA_DIR / "config.json"
+WORKSPACE_DIR = DATA_DIR / "workspace"
+DAEMON_PID_PATH = DATA_DIR / "daemon.pid"
+
+REC_PID_PATH = Path("/tmp/linguo_rec.pid")
+LOCK_PATH = Path("/tmp/linguo_busy.lock")
+AUDIO_TEMP_PATH = Path("/tmp/linguo_mic.mp3")
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+
+DEFAULT_CONFIG = {
+    "hotkey": "<ctrl>+<alt>+<space>",
+    "auto_paste": True,
+    "sound_feedback": True,
+    "tts_engine": "hybrid",  # "hybrid" = Kokoro-82M (English local, 1-core) + Edge-TTS (Thai studio)
+    "eng_voice": "af_heart", # Kokoro voice (af_heart, af_bella, am_adam, etc.)
+    "thai_voice": "th-TH-PremwadeeNeural", # Edge-TTS Thai voice
+    "notifications": True,
+    "model": "gemini-3.6-flash-low"
+}
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        save_config(DEFAULT_CONFIG)
+        return DEFAULT_CONFIG.copy()
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+            for k, v in DEFAULT_CONFIG.items():
+                if k not in cfg:
+                    cfg[k] = v
+            return cfg
+    except Exception:
+        return DEFAULT_CONFIG.copy()
+
+
+def save_config(cfg: dict):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                original_text TEXT NOT NULL,
+                is_correct INTEGER NOT NULL,
+                corrected_english TEXT NOT NULL,
+                grammar_tip TEXT,
+                thai_script TEXT NOT NULL,
+                thai_phonetic TEXT NOT NULL,
+                thai_breakdown TEXT,
+                audio_thai_path TEXT,
+                audio_eng_path TEXT,
+                english_level TEXT,
+                english_better_alternative TEXT,
+                pronunciation_tip TEXT,
+                thai_grammar_tip TEXT,
+                is_starred INTEGER DEFAULT 0
+            )
+        """)
+        # Schema migration: ensure any older tables gain new columns if missing
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(history)")
+        columns = [row[1] for row in cursor.fetchall()]
+        new_cols = {
+            "english_level": "TEXT",
+            "english_better_alternative": "TEXT",
+            "pronunciation_tip": "TEXT",
+            "thai_grammar_tip": "TEXT",
+            "is_starred": "INTEGER DEFAULT 0"
+        }
+        for col, col_type in new_cols.items():
+            if col not in columns:
+                try:
+                    conn.execute(f"ALTER TABLE history ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
+        conn.commit()
+
+
+def copy_to_clipboard(text: str):
+    """Copies text to macOS clipboard using pbcopy."""
+    try:
+        p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE, close_fds=True)
+        p.communicate(input=text.encode("utf-8"))
+    except Exception as e:
+        sys.stderr.write(f"Failed to copy to clipboard: {e}\n")
+
+
+def paste_to_active_window():
+    """Simulates Cmd+V via AppleScript to instantly paste text into any focused app."""
+    script = 'tell application "System Events" to keystroke "v" using command down'
+    subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def play_sound(sound_name: str = "Tink"):
+    """Plays subtle macOS feedback sound."""
+    cfg = load_config()
+    if not cfg.get("sound_feedback", True):
+        return
+    sound_path = f"/System/Library/Sounds/{sound_name}.aiff"
+    if os.path.exists(sound_path):
+        subprocess.Popen(["afplay", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def show_mac_notification(title: str, subtitle: str, message: str):
+    """Displays native macOS Notification Banner."""
+    cfg = load_config()
+    if not cfg.get("notifications", True):
+        return
+    safe_title = title.replace('"', '\\"')
+    safe_subtitle = subtitle.replace('"', '\\"')
+    safe_msg = message.replace('"', '\\"')
+    apple_script = f'display notification "{safe_msg}" with title "{safe_title}" subtitle "{safe_subtitle}"'
+    subprocess.Popen(["osascript", "-e", apple_script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def get_running_recorder_pid() -> int | None:
+    """Returns PID if ffmpeg is currently running, else removes stale PID file and returns None."""
+    if not REC_PID_PATH.exists():
+        return None
+    try:
+        with open(REC_PID_PATH, "r") as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return pid
+    except Exception:
+        REC_PID_PATH.unlink(missing_ok=True)
+        return None
+
+
+def call_agy_coach(text: str) -> dict:
+    """Invokes agy with minimal agent profile (linguo-fast, 0 tools) in isolated workspace."""
+    cfg = load_config()
+    model = cfg.get("model", "gemini-3.6-flash-low")
+    prompt = f'Analyze: """{text}"""'
+
+    cmd = [
+        "agy",
+        "--agent", "linguo-fast",
+        "--model", model,
+        "--dangerously-skip-permissions",
+        "--disable-slash-commands",
+        "--effort", "low",
+        "--output-format", "json",
+        "-p", prompt
+    ]
+
+    try:
+        res = subprocess.run(cmd, cwd=str(WORKSPACE_DIR), capture_output=True, text=True, check=True)
+        outer = json.loads(res.stdout)
+        raw_response = outer.get("response", "").strip()
+
+        json_match = re.search(r"\{.*\}", raw_response, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group(0))
+        return json.loads(raw_response)
+    except Exception as e:
+        sys.stderr.write(f"Error calling agy: {e}\n")
+        return {
+            "is_correct": False,
+            "english_level": "B1",
+            "corrected_english": text,
+            "grammar_tip": f"Error during AGY analysis: {e}",
+            "english_better_alternative": "",
+            "pronunciation_tip": "",
+            "thai_concise_script": "เกิดข้อผิดพลาด",
+            "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
+            "thai_breakdown": "Error",
+            "thai_grammar_tip": ""
+        }
+
+
+def process_audio_file(audio_path: str) -> dict:
+    """Processes audio directly via AGY multimodal engine (single shot)."""
+    cfg = load_config()
+    model = cfg.get("model", "gemini-3.6-flash-low")
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+
+    if groq_key or openai_key:
+        api_url = "https://api.groq.com/openai/v1/audio/transcriptions" if groq_key else "https://api.openai.com/v1/audio/transcriptions"
+        auth_header = f"Bearer {groq_key or openai_key}"
+        whisper_model = "whisper-large-v3-turbo" if groq_key else "whisper-1"
+
+        curl_cmd = [
+            "curl", "-s", "-X", "POST", api_url,
+            "-H", f"Authorization: {auth_header}",
+            "-F", f"file=@{audio_path}",
+            "-F", f"model={whisper_model}"
+        ]
+        res = subprocess.run(curl_cmd, capture_output=True, text=True)
+        try:
+            res_json = json.loads(res.stdout)
+            transcribed = res_json.get("text", "").strip()
+            if transcribed:
+                analysis = call_agy_coach(transcribed)
+                analysis["transcribed_english"] = transcribed
+                return analysis
+        except Exception as e:
+            sys.stderr.write(f"Whisper API error: {e}, falling back to AGY...\n")
+
+    # Native AGY Multimodal Audio (Zero API keys)
+    prompt = f"Listen to the audio file at {audio_path} using the view_file tool."
+    cmd = [
+        "agy",
+        "--agent", "linguo",
+        "--model", model,
+        "--dangerously-skip-permissions",
+        "--disable-slash-commands",
+        "--effort", "low",
+        "-p", prompt
+    ]
+    res = subprocess.run(cmd, cwd=str(WORKSPACE_DIR), capture_output=True, text=True)
+    raw = res.stdout.strip()
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if json_match:
+        return json.loads(json_match.group(0))
+
+    return {}
+
+
+def run_worker(record_id: int):
+    """Calm background synthesis worker (single core, nice priority) for Kokoro-82M (English) + Edge-TTS (Thai)."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM history WHERE id = ?", (record_id,))
+        row = cur.fetchone()
+    if not row:
+        return
+
+    data = dict(row)
+    eng_text = data.get("corrected_english") or data.get("original_text", "")
+    thai_text = data.get("thai_script", "")
+
+    cfg = load_config()
+    tts_engine = cfg.get("tts_engine", "hybrid")
+    ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
+
+    eng_file = AUDIO_DIR / f"eng_{record_id}.mp3"
+    thai_file = AUDIO_DIR / f"thai_{record_id}.mp3"
+
+    eng_ok = False
+    thai_ok = False
+
+    # 1. Synthesize English Audio (Kokoro-82M on 1 CPU thread or Edge-TTS)
+    if eng_text:
+        if tts_engine in ("hybrid", "kokoro"):
+            try:
+                import torch
+                torch.set_num_threads(1)  # Strictly 1 CPU core to keep Mac responsive and quiet
+                from kokoro import KPipeline
+                import soundfile as sf
+                import numpy as np
+
+                pipeline = KPipeline(lang_code='a')
+                voice = cfg.get("eng_voice", "af_heart")
+                if not voice or voice in ("Samantha", "Alex", "Victoria"):
+                    voice = "af_heart"
+                generator = pipeline(eng_text, voice=voice, speed=1)
+                audio_chunks = [audio for _, _, audio in generator]
+                if audio_chunks:
+                    tmp_wav = AUDIO_DIR / f"eng_tmp_{record_id}.wav"
+                    sf.write(str(tmp_wav), np.concatenate(audio_chunks), 24000)
+                    subprocess.run([ffmpeg_bin, "-i", str(tmp_wav), "-y", str(eng_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    tmp_wav.unlink(missing_ok=True)
+                    eng_ok = eng_file.exists()
+            except Exception as e:
+                sys.stderr.write(f"Kokoro failed: {e}\n")
+
+        # Fallback to Edge-TTS if not yet generated
+        if not eng_ok and tts_engine != "local":
+            try:
+                v = cfg.get("edge_eng_voice", "en-US-JennyNeural")
+                subprocess.run([
+                    "edge-tts",
+                    "--voice", v,
+                    "--text", eng_text,
+                    "--write-media", str(eng_file)
+                ], capture_output=True, timeout=8.0, check=True)
+                eng_ok = eng_file.exists()
+            except Exception:
+                pass
+
+        # Final fallback to local say
+        if not eng_ok:
+            try:
+                tmp_aiff = AUDIO_DIR / f"eng_tmp_{record_id}.aiff"
+                subprocess.run(["say", "-v", "Samantha", eng_text, "-o", str(tmp_aiff)], timeout=5.0)
+                if tmp_aiff.exists():
+                    subprocess.run([ffmpeg_bin, "-i", str(tmp_aiff), "-y", str(eng_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    tmp_aiff.unlink(missing_ok=True)
+                    eng_ok = eng_file.exists()
+            except Exception:
+                pass
+
+    # 2. Synthesize Thai Audio (Edge-TTS 48kHz studio quality by default)
+    if thai_text:
+        if tts_engine in ("hybrid", "edge"):
+            try:
+                v = cfg.get("thai_voice", "th-TH-PremwadeeNeural")
+                if not v.startswith("th-"):
+                    v = "th-TH-PremwadeeNeural"
+                subprocess.run([
+                    "edge-tts",
+                    "--voice", v,
+                    "--text", thai_text,
+                    "--write-media", str(thai_file)
+                ], capture_output=True, timeout=8.0, check=True)
+                thai_ok = thai_file.exists()
+            except Exception as e:
+                sys.stderr.write(f"Edge-TTS Thai failed: {e}\n")
+
+        # Fallback to local say
+        if not thai_ok:
+            try:
+                thai_tmp_aiff = AUDIO_DIR / f"thai_tmp_{record_id}.aiff"
+                subprocess.run(["say", "-v", "Kanya", thai_text, "-o", str(thai_tmp_aiff)], timeout=5.0)
+                if thai_tmp_aiff.exists():
+                    subprocess.run([ffmpeg_bin, "-i", str(thai_tmp_aiff), "-filter:a", "volume=2.5", "-y", str(thai_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    thai_tmp_aiff.unlink(missing_ok=True)
+                    thai_ok = thai_file.exists()
+            except Exception:
+                pass
+
+    # Update database with audio paths
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            UPDATE history
+            SET audio_eng_path = ?, audio_thai_path = ?
+            WHERE id = ?
+        """, (str(eng_file) if eng_ok else "", str(thai_file) if thai_ok else "", record_id))
+        conn.commit()
+
+    if cfg.get("notifications"):
+        show_mac_notification("Linguo Coach", f"Audio pronto per frase #{record_id}", "Premi 'lr' per riascoltare!")
+
+
+def replay_audio(target_id: int | None = None, loop_count: int = 1):
+    """Replays the English and Thai pronunciation of the last (or specified) item, optionally in a loop."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        if target_id and target_id > 0:
+            cur.execute("SELECT * FROM history WHERE id = ?", (target_id,))
+        else:
+            cur.execute("SELECT * FROM history ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+
+    if not row:
+        print("❌ Nessuna registrazione trovata nella cronologia.")
+        return
+
+    data = dict(row)
+    loop_str = f" (Loop x{loop_count})" if loop_count > 1 else ""
+    lvl_badge = f" \033[1;33m[{data.get('english_level', 'B1')}]\033[0m" if data.get('english_level') else ""
+    star_str = " \033[1;33m★\033[0m" if data.get('is_starred') else ""
+    print(f"\n🔁 \033[1;36mRiascolto Entry #{data['id']}\033[0m{lvl_badge}{star_str}{loop_str}")
+    print(f"🇬🇧 \033[1mEnglish:\033[0m   \033[1;32m{data['corrected_english']}\033[0m")
+    if data.get('grammar_tip'):
+        print(f"💡 \033[1mGrammar:\033[0m   \033[3m{data['grammar_tip']}\033[0m")
+    if data.get('english_better_alternative'):
+        print(f"🚀 \033[1;34mLevel-Up:\033[0m  \033[34m{data['english_better_alternative']}\033[0m")
+    if data.get('pronunciation_tip'):
+        print(f"🗣️ \033[1;35mPhonetics:\033[0m \033[35m{data['pronunciation_tip']}\033[0m")
+    print(f"🇹🇭 \033[1mThai:\033[0m      \033[1;35m{data['thai_script']}\033[0m (\033[1;93m{data['thai_phonetic']}\033[0m)")
+    if data.get('thai_breakdown'):
+        print(f"🔍 \033[1mBreakdown:\033[0m \033[90m{data['thai_breakdown']}\033[0m")
+    if data.get('thai_grammar_tip'):
+        print(f"💡 \033[1;33mThai Gram:\033[0m \033[33m{data['thai_grammar_tip']}\033[0m")
+    print()
+
+    eng_path = data.get("audio_eng_path") or ""
+    thai_path = data.get("audio_thai_path") or ""
+
+    # If audio is not yet ready, wait up to 15s for the detached background worker
+    if not (eng_path and Path(eng_path).exists() and thai_path and Path(thai_path).exists()):
+        print("⏳ Audio in sintesi in background... attendo...")
+        for _ in range(15):
+            time.sleep(1.0)
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                c = conn.cursor()
+                c.execute("SELECT audio_eng_path, audio_thai_path FROM history WHERE id = ?", (data["id"],))
+                r = c.fetchone()
+                if r:
+                    eng_path = r["audio_eng_path"] or ""
+                    thai_path = r["audio_thai_path"] or ""
+                    if eng_path and Path(eng_path).exists() and thai_path and Path(thai_path).exists():
+                        print("✅ Audio pronto!\n")
+                        break
+
+    for i in range(loop_count):
+        if loop_count > 1:
+            print(f"  ▶️ Ripetizione {i+1}/{loop_count}...")
+        if eng_path and Path(eng_path).exists():
+            subprocess.run(["afplay", eng_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.3)
+        elif data.get("corrected_english"):
+            subprocess.run(["say", "-v", "Samantha", data["corrected_english"]])
+            time.sleep(0.3)
+
+        if thai_path and Path(thai_path).exists():
+            subprocess.run(["afplay", thai_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif data.get("thai_script"):
+            subprocess.run(["say", "-v", "Kanya", data["thai_script"]])
+
+        if i < loop_count - 1:
+            time.sleep(0.8)
+
+
+def toggle_star(record_id: int):
+    """Toggles favorite/star status on a record."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT is_starred FROM history WHERE id = ?", (record_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"❌ Entry #{record_id} non trovata.")
+            return
+        new_val = 0 if row[0] else 1
+        cur.execute("UPDATE history SET is_starred = ? WHERE id = ?", (new_val, record_id))
+        conn.commit()
+    star_icon = "★ Aggiunto ai preferiti" if new_val else "☆ Rimosso dai preferiti"
+    print(f"✨ Entry #{record_id}: {star_icon}")
+
+
+def save_record(data: dict, original_text: str, thai_audio: str = "", eng_audio: str = "") -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO history (
+                original_text, is_correct, corrected_english, grammar_tip,
+                thai_script, thai_phonetic, thai_breakdown, audio_thai_path, audio_eng_path,
+                english_level, english_better_alternative, pronunciation_tip, thai_grammar_tip, is_starred
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (
+            original_text,
+            1 if data.get("is_correct") else 0,
+            data.get("corrected_english", ""),
+            data.get("grammar_tip", ""),
+            data.get("thai_concise_script", ""),
+            data.get("thai_phonetic_western", ""),
+            data.get("thai_breakdown", ""),
+            thai_audio,
+            eng_audio,
+            data.get("english_level", "B1"),
+            data.get("english_better_alternative", ""),
+            data.get("pronunciation_tip", ""),
+            data.get("thai_grammar_tip", "")
+        ))
+        conn.commit()
+        rec_id = cur.lastrowid
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    status_icon = "✅" if data.get("is_correct") else "⚠️"
+    level = data.get("english_level", "B1")
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(f"\n### [{timestamp}] Entry #{rec_id} [{level}] {status_icon}\n")
+        f.write(f"- **Input**: {original_text}\n")
+        f.write(f"- **Corrected**: {data.get('corrected_english')}\n")
+        f.write(f"- **Grammar Tip**: {data.get('grammar_tip')}\n")
+        if data.get("english_better_alternative"):
+            f.write(f"- **Level-Up Alternative**: {data.get('english_better_alternative')}\n")
+        if data.get("pronunciation_tip"):
+            f.write(f"- **Pronunciation & Phonetics**: {data.get('pronunciation_tip')}\n")
+        f.write(f"- **Thai**: `{data.get('thai_concise_script')}` -> **`{data.get('thai_phonetic_western')}`**\n")
+        f.write(f"- **Breakdown**: {data.get('thai_breakdown')}\n")
+        if data.get("thai_grammar_tip"):
+            f.write(f"- **Thai Grammar**: {data.get('thai_grammar_tip')}\n")
+
+    return rec_id
+
+
+def print_card(data: dict, original: str):
+    """Prints a styled terminal card."""
+    is_correct = data.get("is_correct")
+    status_color = "\033[92m" if is_correct else "\033[93m"
+    status_badge = f"{status_color}● Perfect!{status_color}\033[0m" if is_correct else f"{status_color}▲ Needs Correction\033[0m"
+    level = data.get("english_level", "B1")
+
+    print("\n\033[1;36m╭───────────────────────── Linguo Coach ─────────────────────────╮\033[0m")
+    print(f"│  \033[1mLivello:\033[0m    \033[1;33m[{level}]\033[0m  {status_badge}")
+    print(f"│  \033[1mInput:\033[0m      {original}")
+    print(f"│  \033[1mEnglish:\033[0m    \033[1;32m{data.get('corrected_english')}\033[0m")
+    print(f"│  \033[1mGrammar:\033[0m    \033[3m{data.get('grammar_tip')}\033[0m")
+    if data.get("english_better_alternative"):
+        print(f"│  \033[1;34m🚀 Level-Up:\033[0m \033[34m{data.get('english_better_alternative')}\033[0m")
+    if data.get("pronunciation_tip"):
+        print(f"│  \033[1;35m🗣️ Pronounce:\033[0m\033[35m {data.get('pronunciation_tip')}\033[0m")
+    print("│  ─────────────────────────────────────────────────────────────")
+    print(f"│  \033[1mThai Concept (Beginner):\033[0m \033[1;35m{data.get('thai_concise_script')}\033[0m")
+    print(f"│  \033[1mPronounce:\033[0m    \033[1;93m{data.get('thai_phonetic_western')}\033[0m")
+    print(f"│  \033[1mBreakdown:\033[0m    \033[90m{data.get('thai_breakdown')}\033[0m")
+    if data.get("thai_grammar_tip"):
+        print(f"│  \033[1;33m💡 Thai Grammar:\033[0m \033[33m{data.get('thai_grammar_tip')}\033[0m")
+    print("\033[1;36m╰────────────────────────────────────────────────────────────────╯\033[0m")
+    print("🎧 \033[2mAudio in background (Kokoro-82M + Edge-TTS)... pronto con 'lr' o 'lb'!\033[0m\n")
+
+
+def spawn_detached_ffmpeg(cmd: list, pid_file: Path):
+    """Spawns an orphaned ffmpeg process reparented to launchd (PID 1) so no parent or shell exit can terminate it."""
+    pid = os.fork()
+    if pid > 0:
+        os.waitpid(pid, 0)
+        return
+    os.setsid()
+    pid2 = os.fork()
+    if pid2 > 0:
+        with open(pid_file, "w") as f:
+            f.write(str(pid2))
+        os._exit(0)
+    devnull = os.open(os.devnull, os.O_RDWR)
+    os.dup2(devnull, 0)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    os.execv(cmd[0], cmd)
+
+
+def toggle_recording():
+    """Toggle action: Start recording on 1st trigger, Stop + Process + Paste on 2nd trigger."""
+    if LOCK_PATH.exists():
+        show_mac_notification("Linguo", "⏳ Un attimo...", "Elaborazione in corso.")
+        return
+
+    active_pid = get_running_recorder_pid()
+    ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
+    cfg = load_config()
+
+    if active_pid is None:
+        # START RECORDING
+        AUDIO_TEMP_PATH.unlink(missing_ok=True)
+        play_sound("Tink")
+        cmd = [
+            ffmpeg_bin,
+            "-f", "avfoundation",
+            "-i", ":0",
+            "-ar", "22050",
+            "-ac", "1",
+            "-y",
+            str(AUDIO_TEMP_PATH)
+        ]
+        spawn_detached_ffmpeg(cmd, REC_PID_PATH)
+        show_mac_notification("Linguo", "🎙️ In ascolto...", "Parla in inglese. Premi di nuovo per concludere.")
+        print("🎙️ Recording started.")
+    else:
+        # STOP RECORDING & PROCESS
+        LOCK_PATH.touch()
+        play_sound("Pop")
+        try:
+            os.kill(active_pid, signal.SIGINT)
+            time.sleep(0.4)
+        except Exception:
+            pass
+        finally:
+            REC_PID_PATH.unlink(missing_ok=True)
+
+        show_mac_notification("Linguo", "⚡ Elaborazione...", "Trascrizione Flash 3.6 in corso...")
+        print("⚡ Recording stopped. Processing...")
+
+        try:
+            if not AUDIO_TEMP_PATH.exists() or AUDIO_TEMP_PATH.stat().st_size < 1000:
+                show_mac_notification("Linguo", "⚠️ Audio troppo breve", "Nessun parlato rilevato.")
+                return
+
+            result = process_audio_file(str(AUDIO_TEMP_PATH))
+            if result and result.get("transcribed_english"):
+                eng_text = result.get("corrected_english", result["transcribed_english"])
+                copy_to_clipboard(eng_text)
+
+                if cfg.get("auto_paste", True):
+                    time.sleep(0.3)
+                    paste_to_active_window()
+
+                thai_script = result.get("thai_concise_script", "")
+                thai_phonetic = result.get("thai_phonetic_western", "")
+                thai_disp = f"{thai_script} ({thai_phonetic})"
+                tip_disp = result.get('grammar_tip', 'Perfetto!')
+                show_mac_notification("Linguo Coach", f"🇹🇭 {thai_disp}", f"{eng_text}\n{tip_disp}")
+
+                rec_id = save_record(result, result["transcribed_english"])
+                print_card(result, result["transcribed_english"])
+
+                # Calm background worker on 1 CPU core with lowest priority
+                worker_cmd = ["nice", "-n", "15", sys.executable, str(Path(__file__).resolve()), "worker", str(rec_id)]
+                subprocess.Popen(worker_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            else:
+                show_mac_notification("Linguo", "⚠️ Nessuna risposta", "Riprova a parlare più chiaramente.")
+        finally:
+            LOCK_PATH.unlink(missing_ok=True)
+
+
+def run_interactive_board():
+    """ADHD-friendly Interactive Terminal Board (TUI) for reviewing, flashcards, re-listening, and looping phrases in an iTerm2 tab."""
+    import curses
+    import locale
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except Exception:
+        pass
+
+    def _tui(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        if curses.has_colors():
+            curses.init_pair(1, curses.COLOR_CYAN, -1)     # Header / Accent
+            curses.init_pair(2, curses.COLOR_GREEN, -1)    # Perfect / English
+            curses.init_pair(3, curses.COLOR_YELLOW, -1)   # Warning / Phonetics
+            curses.init_pair(4, curses.COLOR_MAGENTA, -1)  # Thai Script
+            curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_CYAN) # Highlighted bar
+            curses.init_pair(6, curses.COLOR_WHITE, -1)    # Normal text
+            curses.init_pair(7, curses.COLOR_BLUE, -1)     # Level-up alternative
+
+        selected_idx = 0
+        scroll_offset = 0
+        flashcard_mode = False
+        filter_starred = False
+        revealed_ids = set()
+
+        def load_entries():
+            init_db()
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                if filter_starred:
+                    cur.execute("SELECT * FROM history WHERE is_starred = 1 ORDER BY id DESC")
+                else:
+                    cur.execute("SELECT * FROM history ORDER BY id DESC")
+                return [dict(r) for r in cur.fetchall()]
+
+        entries = load_entries()
+
+        def _play_item_audio(item: dict, loop_count: int = 1):
+            eng_p = item.get("audio_eng_path") or ""
+            thai_p = item.get("audio_thai_path") or ""
+            parts = []
+            if eng_p and Path(eng_p).exists():
+                parts.append(f"afplay '{eng_p}'")
+            elif item.get("corrected_english"):
+                safe_e = item['corrected_english'].replace("'", "'\\''")
+                parts.append(f"say -v Samantha '{safe_e}'")
+            if thai_p and Path(thai_p).exists():
+                parts.append(f"afplay '{thai_p}'")
+            elif item.get("thai_script"):
+                safe_t = item['thai_script'].replace("'", "'\\''")
+                parts.append(f"say -v Kanya '{safe_t}'")
+            if not parts:
+                return
+            seq = "; sleep 0.3; ".join(parts)
+            if loop_count > 1:
+                cmd_str = f"for i in $(seq 1 {loop_count}); do {seq}; sleep 0.8; done"
+            else:
+                cmd_str = seq
+            subprocess.Popen(["sh", "-c", cmd_str], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+        while True:
+            stdscr.clear()
+            h, w = stdscr.getmaxyx()
+
+            if h < 14 or w < 70:
+                stdscr.addstr(0, 0, "Finestra troppo piccola. Allarga la tab di iTerm2!")
+                stdscr.refresh()
+                key = stdscr.getch()
+                if key in (ord('q'), ord('Q'), 27):
+                    break
+                continue
+
+            # Header
+            mode_tag = " [🧠 FLASHCARD MODE]" if flashcard_mode else ""
+            filter_tag = " [★ PREFERITI]" if filter_starred else ""
+            title = f" 🧠 LINGUO ADHD BOARD{mode_tag}{filter_tag} "
+            stdscr.addstr(0, 2, title, curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(0, min(w - 24, len(title) + 4), f"Totale: {len(entries)} frasi", curses.color_pair(6))
+
+            # Split layout: List on Left, Details on Right
+            list_w = min(38, max(26, w // 3))
+            right_w = w - list_w - 3
+
+            # Draw vertical divider
+            for y in range(1, h - 2):
+                stdscr.addch(y, list_w, curses.ACS_VLINE)
+
+            # Left list: entries
+            visible_rows = h - 4
+            if selected_idx < scroll_offset:
+                scroll_offset = selected_idx
+            elif selected_idx >= scroll_offset + visible_rows:
+                scroll_offset = selected_idx - visible_rows + 1
+
+            for i in range(visible_rows):
+                entry_idx = scroll_offset + i
+                if entry_idx >= len(entries):
+                    break
+                item = entries[entry_idx]
+                y = 2 + i
+                is_sel = (entry_idx == selected_idx)
+                status_char = "●" if item.get("is_correct") else "▲"
+                status_color = curses.color_pair(2) if item.get("is_correct") else curses.color_pair(3)
+                star_mark = "★" if item.get("is_starred") else " "
+                lvl = item.get("english_level") or "B1"
+
+                line_str = f"{star_mark}#{item['id']} [{lvl}] {item['corrected_english'][:list_w-14]}"
+                if is_sel:
+                    stdscr.addstr(y, 1, line_str.ljust(list_w - 1)[:list_w-1], curses.color_pair(5) | curses.A_BOLD)
+                else:
+                    stdscr.addstr(y, 1, status_char, status_color)
+                    stdscr.addstr(y, 3, line_str[:list_w-4], curses.color_pair(6))
+
+            # Right pane: Details of selected entry
+            if entries and 0 <= selected_idx < len(entries):
+                cur_item = entries[selected_idx]
+                item_id = cur_item["id"]
+                is_revealed = (not flashcard_mode) or (item_id in revealed_ids)
+
+                rx = list_w + 2
+                ry = 2
+
+                # ID, Date, Star, Level
+                star_disp = "★ PREFERITO" if cur_item.get("is_starred") else "☆"
+                lvl = cur_item.get("english_level", "B1")
+                stdscr.addstr(ry, rx, f"ENTRY #{item_id}  [{cur_item['timestamp']}]  [{lvl}]  {star_disp}"[:right_w], curses.color_pair(1) | curses.A_BOLD)
+                ry += 1
+                status_lbl = "● PERFETTO" if cur_item.get("is_correct") else "▲ DA CORREGGERE"
+                status_col = curses.color_pair(2) if cur_item.get("is_correct") else curses.color_pair(3)
+                stdscr.addstr(ry, rx, status_lbl, status_col | curses.A_BOLD)
+                ry += 2
+
+                # English Section
+                stdscr.addstr(ry, rx, "🇬🇧 INGLESE CORRETTO:", curses.color_pair(6) | curses.A_DIM)
+                ry += 1
+                stdscr.addstr(ry, rx, cur_item["corrected_english"][:right_w], curses.color_pair(2) | curses.A_BOLD)
+                ry += 2
+
+                # Grammar Tip
+                if cur_item.get("grammar_tip"):
+                    stdscr.addstr(ry, rx, "💡 REGOLA GRAMMATICALE (ENG):", curses.color_pair(6) | curses.A_DIM)
+                    ry += 1
+                    tip = cur_item["grammar_tip"]
+                    while tip and ry < h - 10:
+                        stdscr.addstr(ry, rx, tip[:right_w], curses.color_pair(6))
+                        tip = tip[right_w:]
+                        ry += 1
+                    ry += 1
+
+                # Level-Up Alternative Phrasing
+                if cur_item.get("english_better_alternative") and ry < h - 9:
+                    stdscr.addstr(ry, rx, "🚀 LIVELLO SUPERIORE (B2-C1):", curses.color_pair(7) | curses.A_DIM)
+                    ry += 1
+                    stdscr.addstr(ry, rx, cur_item["english_better_alternative"][:right_w], curses.color_pair(7) | curses.A_BOLD)
+                    ry += 2
+
+                # Pronunciation / Phonetics tip
+                if cur_item.get("pronunciation_tip") and ry < h - 8:
+                    stdscr.addstr(ry, rx, "🗣️ FONETICA & PRONUNCIA:", curses.color_pair(3) | curses.A_DIM)
+                    ry += 1
+                    stdscr.addstr(ry, rx, cur_item["pronunciation_tip"][:right_w], curses.color_pair(3))
+                    ry += 2
+
+                # Divider
+                if ry < h - 7:
+                    stdscr.addstr(ry, rx, "─" * min(right_w, 55), curses.color_pair(6) | curses.A_DIM)
+                    ry += 1
+
+                # Thai Section / Flashcard active recall
+                if not is_revealed:
+                    ry += 1
+                    stdscr.addstr(ry, rx, "🧠 [FLASHCARD] Come si dice in Thailandese?", curses.color_pair(3) | curses.A_BOLD)
+                    ry += 2
+                    stdscr.addstr(ry, rx, "▶ Premi [SPAZIO] per verificare la risposta & ascoltare!", curses.color_pair(1) | curses.A_BOLD)
+                else:
+                    stdscr.addstr(ry, rx, "🇹🇭 THAI (Principiante 2-4 parole):", curses.color_pair(6) | curses.A_DIM)
+                    ry += 1
+                    try:
+                        stdscr.addstr(ry, rx, cur_item["thai_script"][:right_w], curses.color_pair(4) | curses.A_BOLD)
+                    except Exception:
+                        pass
+                    ry += 1
+                    stdscr.addstr(ry, rx, f"Pronuncia (Toni Paiboon): {cur_item['thai_phonetic']}"[:right_w], curses.color_pair(3) | curses.A_BOLD)
+                    ry += 2
+
+                    if cur_item.get("thai_breakdown") and ry < h - 4:
+                        stdscr.addstr(ry, rx, f"Scomposizione: {cur_item['thai_breakdown'][:right_w]}", curses.color_pair(6) | curses.A_DIM)
+                        ry += 1
+
+                    if cur_item.get("thai_grammar_tip") and ry < h - 3:
+                        stdscr.addstr(ry, rx, f"💡 Grammatica Thai: {cur_item['thai_grammar_tip'][:right_w]}", curses.color_pair(3))
+
+            # Footer / Shortcuts help bar
+            bar_text = " [↑/↓] Nav  [Spazio] Ascolta/Svela  [f] Flashcard  [s] Stella ★  [Tab] Filtro ★  [l] Loop  [q] Esci"
+            stdscr.addstr(h - 1, 0, bar_text.ljust(w - 1)[:w-1], curses.color_pair(5))
+
+            stdscr.refresh()
+
+            # Handle key events
+            key = stdscr.getch()
+            if key in (ord('q'), ord('Q'), 27): # q or Esc
+                break
+            elif key in (ord('r'), ord('R')): # Reload
+                entries = load_entries()
+            elif key in (curses.KEY_UP, ord('k'), ord('K')):
+                if selected_idx > 0:
+                    selected_idx -= 1
+            elif key in (curses.KEY_DOWN, ord('j'), ord('J')):
+                if selected_idx < len(entries) - 1:
+                    selected_idx += 1
+            elif key == ord('f'): # Flashcard mode toggle
+                flashcard_mode = not flashcard_mode
+            elif key == 9: # Tab: Filter starred
+                filter_starred = not filter_starred
+                entries = load_entries()
+                selected_idx = 0
+            elif key in (ord('s'), ord('S')): # Toggle Star
+                if entries:
+                    cur_id = entries[selected_idx]["id"]
+                    new_val = 0 if entries[selected_idx].get("is_starred") else 1
+                    entries[selected_idx]["is_starred"] = new_val
+                    with sqlite3.connect(DB_PATH) as conn:
+                        conn.execute("UPDATE history SET is_starred = ? WHERE id = ?", (new_val, cur_id))
+                        conn.commit()
+            elif key == ord(' '): # Space: Play audio or reveal flashcard
+                if entries:
+                    item = entries[selected_idx]
+                    if flashcard_mode and item["id"] not in revealed_ids:
+                        revealed_ids.add(item["id"])
+                    _play_item_audio(item, loop_count=1)
+            elif key in (ord('l'), ord('L')): # Loop 3x
+                if entries:
+                    _play_item_audio(entries[selected_idx], loop_count=3)
+            elif key in (ord('e'), ord('E')): # English only
+                if entries:
+                    item = entries[selected_idx]
+                    eng_path = item.get("audio_eng_path") or ""
+                    if eng_path and Path(eng_path).exists():
+                        subprocess.Popen(["afplay", eng_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                    elif item.get("corrected_english"):
+                        subprocess.Popen(["say", "-v", "Samantha", item["corrected_english"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            elif key in (ord('t'), ord('T')): # Thai only
+                if entries:
+                    item = entries[selected_idx]
+                    thai_path = item.get("audio_thai_path") or ""
+                    if thai_path and Path(thai_path).exists():
+                        subprocess.Popen(["afplay", thai_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                    elif item.get("thai_script"):
+                        subprocess.Popen(["say", "-v", "Kanya", item["thai_script"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+    curses.wrapper(_tui)
+
+
+def run_menu_bar_app():
+    """Runs a lightweight native macOS Menu Bar item using PyObjC Cocoa."""
+    import Cocoa
+    import objc
+
+    app = Cocoa.NSApplication.sharedApplication()
+    app.setActivationPolicy_(Cocoa.NSApplicationActivationPolicyAccessory)
+
+    class StatusApp(Cocoa.NSObject):
+        def init(self):
+            self = objc.super(StatusApp, self).init()
+            if self:
+                self.status_item = Cocoa.NSStatusBar.systemStatusBar().statusItemWithLength_(Cocoa.NSVariableStatusItemLength)
+                self.button = self.status_item.button()
+                self.button.setTitle_("🎙️")
+                self.button.setTarget_(self)
+                self.button.setAction_("clicked:")
+            return self
+
+        @objc.IBAction
+        def clicked_(self, sender):
+            active_pid = get_running_recorder_pid()
+            if active_pid is None:
+                self.button.setTitle_("🔴 Rec...")
+                threading.Thread(target=toggle_recording, daemon=True).start()
+            else:
+                self.button.setTitle_("⚡ Proc...")
+                def finish():
+                    toggle_recording()
+                    self.button.setTitle_("🎙️")
+                threading.Thread(target=finish, daemon=True).start()
+
+    delegate = StatusApp.alloc().init()
+    print("🎙️ Linguo Menu Bar icon active in top right. Click it to speak / paste!")
+    app.run()
+
+
+def show_history(limit: int = 5, as_json: bool = False):
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,))
+        rows = cur.fetchall()
+
+    if as_json:
+        data = [dict(r) for r in rows]
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return
+
+    print(f"\n\033[1;34m─── Linguo History (Last {len(rows)} entries) ───\033[0m")
+    for r in reversed(rows):
+        status = "✅" if r["is_correct"] else "⚠️"
+        lvl = f"[{r.get('english_level', 'B1')}]"
+        star = "★" if r.get("is_starred") else ""
+        print(f"\n#{r['id']} [{r['timestamp']}] {lvl} {star} {status}")
+        print(f"  \033[1mOriginal:\033[0m  {r['original_text']}")
+        print(f"  \033[1mCorrected:\033[0m {r['corrected_english']}")
+        if r.get("english_better_alternative"):
+            print(f"  \033[1mLevel-Up:\033[0m  {r['english_better_alternative']}")
+        print(f"  \033[1mThai:\033[0m      {r['thai_script']} ({r['thai_phonetic']})")
+        if r["grammar_tip"]:
+            print(f"  \033[1mTip:\033[0m       \033[3m{r['grammar_tip']}\033[0m")
+        if r.get("thai_grammar_tip"):
+            print(f"  \033[1mThai Gram:\033[0m \033[33m{r['thai_grammar_tip']}\033[0m")
+
+
+def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
+    init_db()
+    if copy_clip:
+        copy_to_clipboard(text)
+    analysis = call_agy_coach(text)
+    rec_id = save_record(analysis, text)
+    print_card(analysis, text)
+    if not silent_audio:
+        # Calm detached background worker on 1 CPU core
+        worker_cmd = ["nice", "-n", "15", sys.executable, str(Path(__file__).resolve()), "worker", str(rec_id)]
+        subprocess.Popen(worker_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "worker":
+        if len(sys.argv) > 2 and sys.argv[2].isdigit():
+            run_worker(int(sys.argv[2]))
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "star":
+        if len(sys.argv) > 2 and sys.argv[2].isdigit():
+            toggle_star(int(sys.argv[2]))
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("popup", "-p", "--popup", "toggle", "--toggle"):
+        toggle_recording()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] in ("board", "-b", "--board"):
+        run_interactive_board()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] in ("loop", "-l", "--loop"):
+        count = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 3
+        replay_audio(loop_count=count)
+        return
+    if len(sys.argv) > 1 and sys.argv[1] in ("replay", "-r", "--replay"):
+        target_id = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
+        replay_audio(target_id)
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "bar":
+        run_menu_bar_app()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "tts":
+        cfg = load_config()
+        if len(sys.argv) > 2 and sys.argv[2] in ("hybrid", "kokoro-edge"):
+            cfg["tts_engine"] = "hybrid"
+            save_config(cfg)
+            print("✨ Linguo TTS impostato su: \033[1;32mHybrid (Kokoro-82M locale 1-core + Edge-TTS Thai)[0m.")
+            return
+        elif len(sys.argv) > 2 and sys.argv[2] in ("kokoro", "local-kokoro"):
+            cfg["tts_engine"] = "kokoro"
+            save_config(cfg)
+            print("🧠 Linguo TTS impostato su: \033[1;32mKokoro-82M Locale[0m (Inglese locale neurale + Say Thai).")
+            return
+        elif len(sys.argv) > 2 and sys.argv[2] in ("edge", "neural", "cloud"):
+            cfg["tts_engine"] = "edge"
+            save_config(cfg)
+            print("✨ Linguo TTS impostato su: \033[1;32mNeural Edge-TTS[0m (qualità studio Azure, voci Premwadee & Jenny).")
+            return
+        elif len(sys.argv) > 2 and sys.argv[2] in ("local", "say", "mac"):
+            cfg["tts_engine"] = "local"
+            save_config(cfg)
+            print("🔊 Linguo TTS impostato su: \033[1;33mLocal macOS say[0m (100% offline, voci Kanya & Samantha).")
+            return
+        else:
+            engine = cfg.get("tts_engine", "hybrid")
+            print(f"Linguo TTS Engine attuale: \033[1m{engine}[0m")
+            print("Uso: linguo tts [hybrid|kokoro|edge|local]")
+            return
+
+    parser = argparse.ArgumentParser(
+        description="Linguo: Dual English-Thai CLI Voice & Language Coach"
+    )
+    parser.add_argument("text", nargs="*", help="English sentence to analyze")
+    parser.add_argument("-b", "--board", action="store_true", help="Launch interactive ADHD terminal study board in iTerm2")
+    parser.add_argument("-v", "--voice", action="store_true", help="Record audio from microphone")
+    parser.add_argument("-r", "--replay", type=int, nargs="?", const=-1, help="Replay audio pronunciation (default: last)")
+    parser.add_argument("-l", "--loop", type=int, nargs="?", const=3, help="Loop audio playback N times for memorization (default: 3)")
+    parser.add_argument("--toggle", action="store_true", help="Toggle hotkey recording (start on 1st run, stop & paste on 2nd)")
+    parser.add_argument("--no-audio", action="store_true", help="Do not play audio")
+    parser.add_argument("--history", type=int, nargs="?", const=5, help="View recent history (default: 5)")
+    parser.add_argument("--json", action="store_true", help="Output history as JSON")
+
+    args = parser.parse_args()
+
+    if args.board:
+        run_interactive_board()
+        return
+
+    if args.loop is not None:
+        replay_audio(loop_count=args.loop)
+        return
+
+    if args.replay is not None:
+        target_id = None if args.replay == -1 else args.replay
+        replay_audio(target_id)
+        return
+
+    if args.toggle or args.voice:
+        toggle_recording()
+        return
+
+    if args.history:
+        show_history(limit=args.history, as_json=args.json)
+        return
+
+    if not sys.stdin.isatty():
+        input_text = sys.stdin.read().strip()
+    elif args.text:
+        input_text = " ".join(args.text).strip()
+    else:
+        parser.print_help()
+        sys.exit(0)
+
+    if input_text:
+        process_text(input_text, silent_audio=args.no_audio)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,16 @@
+[project]
+name = "linguo"
+version = "0.2.0"
+description = "Dual English-Thai CLI Voice & Language Coach with ADHD Interactive TUI, Kokoro-82M offline TTS and Edge-TTS"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "numpy<2.0.0",
+    "soundfile>=0.12.1",
+    "kokoro>=0.9.4",
+    "edge-tts>=7.0.0",
+]
+
+[project.scripts]
+linguo = "bin.linguo:main"

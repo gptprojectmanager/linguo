@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Linguo Local Data & Audio Caches
+history.db
+history.db-journal
+history.md
+*.pid
+*.lock
+*.mp3
+*.wav
+*.aiff
+audio/
+workspace/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
