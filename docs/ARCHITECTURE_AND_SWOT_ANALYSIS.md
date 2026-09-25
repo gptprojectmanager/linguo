@@ -152,10 +152,15 @@ Un punteggio del 100% in ingegneria del software è pura propaganda. Questa arch
 
 ## 5. Il Piano di Implementazione Definitivo
 
-### Fase 1: Motore Core e Audit CLI (COMPLETATA ✅)
+### Fase 1: Motore Core, Affidabilità e Audit CLI (COMPLETATA ✅)
 * [x] Schema SQLite aggiornato con WAL mode, colonna `error_category` in `history` e tabella `cards`.
 * [x] Prompt degli agenti sincronizzati (`linguo-fast` e `linguo`) per emettere `error_category` in formato standard.
 * [x] Configurazione permanente audio: `af_nicole` (Kokoro) + `th-TH-PremwadeeNeural` (Edge-TTS) a velocità didattica `0.8`.
+* [x] Validazione rigida degli schemi e auto-healing fuzzy tramite **Pydantic v2 (Rust-core)**.
+* [x] Diagnostica completa permessi macOS (TCC Mic, Accessibilità) e stato motori tramite `linguo doctor`.
+* [x] Smart Pre-caching offline dei mattoni di sopravvivenza Thai con `linguo preseed` (qualità Frontier studio in locale).
+* [x] Algoritmo di Auto-Mastery algoritmica a streak (3 successi consecutivi) integrato in `linguo audit`.
+* [x] Esportazione automatizzata mazzo Anki TSV con `linguo export`.
 * [x] Sviluppo del comando `linguo audit`: raggruppa le trascrizioni con errori e conia le carte MTG solo per i gap reali.
 * [x] Sviluppo del comando `linguo cards`: navigazione, visualizzazione Fronte (Active Recall puzzle), Retro (`--flip`) e marcatura superata (`--master`).
 
