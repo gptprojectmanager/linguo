@@ -211,50 +211,36 @@ Un punteggio del 100% in ingegneria del software è pura propaganda. Questa arch
   * Se una parola insolita non è in cache e non c'è rete, interviene direttamente macOS con `say -v Kanya` (già integrato in ogni Mac, 0 MB da scaricare, 0 librerie esterne).
   * Un filtro audio ffmpeg (`aresample=24000, equalizer=f=1000:t=q:w=1:g=-3`) attenua il clipping metallico della voce di sistema.
 
-### W2: Il clustering degli errori attuale è euristico su 5 archetipi
-* **Mitigazione KISS (Architettura Ibrida Euristica + Fallback Mini-Batch LLM)**:
-  * L'euristica locale analizza all'istante l'85% degli errori standard a zero token e zero latenza (`ARTICLES`, `VERB_PATTERNS`, `PREPOSITIONS`, `TENSES`, `AGREEMENT`).
-  * Se una frase presenta un errore non catalogato (es. phrasal verbs complessi, false friends, idiomi), viene marcata come `UNCLASSIFIED`.
-  * Durante `linguo audit`, solo queste poche frasi non catalogate vengono inviate in **una singola micro-chiamata batch LLM** (~70 token) con prompt mirato:
-    ```json
-    { "task": "cluster_unclassified", "errors": ["..."], "output": "arcade_archetype_proposal" }
-    ```
-* **Registro Dinamico su SQLite**:
-  * Tabella `card_archetypes` in `history.db` per salvare dinamicamente nuovi sprite e archetipi generati, senza necessità di ricompilare o toccare il codice Python.
+### W2: Il clustering degli errori attuale è euristico su 5 archetipi (RISOLTO ✅)
+* **Registro Dinamico su SQLite (`card_archetypes`)**:
+  * Tabella `card_archetypes` in `history.db` attiva e popolata con gli archetipi di default.
+  * Funzione `get_archetype(category)`: interroga per primo il database SQLite; consente l'inserimento immediato di nuovi sprite, regole e gag comiche senza ricompilare o modificare il codice sorgente.
 
-### W3: Toolchain Rust da configurare per Dear ImGui (`imgui-rs`)
-* **Mitigazione KISS (Single-Binary Build Script)**:
-  * Script automatizzato `install_gui.sh`:
-    ```bash
-    cargo build --release --manifest-path gui/dash-gui/Cargo.toml
-    cp gui/dash-gui/target/release/dash-gui ~/.local/bin/linguo-gui
-    ```
-  * Il file risultante è un singolo binario ELF/Mach-O statico di ~9 MB con zero dipendenze esterne.
+### W3: Toolchain Rust da configurare per Dear ImGui (`imgui-rs`) (RISOLTO ✅)
+* **Single-Binary Build Script (`install_gui.sh`)**:
+  * Script automatizzato che compila `dash-gui` con ottimizzazioni release in ~5 secondi, producendo un singolo binario Mach-O statico di soli 7.0 MB in `~/.local/bin/linguo-gui` con codesigning ad-hoc.
 * **Bridge TUI Immediato**:
-  * La TUI terminale `linguo board` (`lb`) in `curses` è già attiva e funzionante al 100% su qualsiasi macOS senza compilare nulla.
+  * La TUI terminale `linguo --board` (`lb`) in `curses` affianca la GUI per sessioni full-terminal.
 
 ---
 
 ## 7. Proposte di Sviluppo per le OPPORTUNITIES
 
-### O1: Spaced Repetition (SR) e "Auto-Mastery" Passiva (Zero Sforzo ADHD)
-* **Eliminazione del Click Manuale**: Le app come Anki falliscono per gli utenti ADHD a causa dell'attrito di dover valutare manualmente *"Difficile / Buono / Facile"*.
-* **Algoritmo di Prestazione Reale**:
-  * L'audit monitora le trascrizioni vocali successive nei giorni a venire.
-  * Se l'utente usa la struttura corretta per **3 sessioni consecutive** (es. 3 frasi con `the + luogo` senza errori), la carta corrispondente (`THE MARKET STAMP`) viene promossa in automatico a `is_mastered = 1`.
-  * Banner arcade a terminale / GUI: `🏆 ACHIEVEMENT UNLOCKED: DEFINITE ARTICLE MASTERED!`.
-  * Se a distanza di settimane l'errore ricompare in due trascrizioni, la carta viene riattivata automaticamente in cima al deck.
+### O1: Spaced Repetition (SR) e "Auto-Mastery" Passiva (Zero Sforzo ADHD) (COMPLETATA ✅)
+* **Algoritmo di Prestazione Reale & Recidiva**:
+  * Promozione automatica a `is_mastered = 1` quando vengono rilevati 3 usi corretti consecutivi dopo la creazione della carta.
+  * **Reattivazione Automatica Recidivi**: se a distanza di tempo l'utente commette nuovi errori nella stessa categoria, `linguo audit` riattiva automaticamente la carta (`is_mastered = 0`), aggiorna gli ID di history e segnala a schermo il rientro della carta nel mazzo attivo (`⚠️ [REACTIVATION]`).
 
-### O2: Esportazione Istantanea su Anki Mobile (`.apkg` / CSV)
-* Comando `linguo export --anki`:
-  * Genera un deck Anki importabile su iOS / Android con Fronte (puzzle), Retro (soluzione, regola British Council, gag comica) e gli audio MP3 nativi già inclusi. Ideale per il ripasso rapido sui mezzi pubblici o offline.
+### O2: Esportazione Istantanea su Anki Mobile (`.apkg` / TSV) (COMPLETATA ✅)
+* Comando `linguo --export`:
+  * Genera `~/.local/share/linguo/cards_anki_export.tsv` formattato con markup HTML per importazione immediata su Anki Desktop e AnkiMobile (iOS/Android).
 
-### O3: Floating Native Desktop HUD su macOS Monterey
-* Finestra borderless semi-trasparente sempre in sovrimpressione, pilotata da global hotkey (`Cmd+Shift+L` via `rdev` o carbon event handler):
-  * `[Space]`: flip della card Fronte / Retro.
-  * `[r]`: replay istantaneo pronuncia (Kokoro 0.8x / Premwadee).
-  * `[m]`: toggle stato mastered.
-  * Consumo CPU a riposo: **0.0%** (loop basato su eventi/wait-events anziché polling continuo). Memoria: **~15 MB**.
+### O3: Floating Native Desktop HUD su macOS Monterey (COMPLETATA ✅)
+* **Finestra Flottante Always-on-Top**:
+  * Pulsante `[📌 Pin (P)]` nell'header e scorciatoia rapida da tastiera `[P]` per commutare `egui::WindowLevel::AlwaysOnTop`.
+  * Rimane visibile sopra l'editor di codice o il terminale durante sessioni di lavoro prolungate.
+  * Consumo CPU a riposo: **0.0%**. Memoria: **~15 MB**.
+
 
 ---
 

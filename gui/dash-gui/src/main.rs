@@ -30,6 +30,7 @@ struct LinguoGuiApp {
     cards: Vec<LinguoCard>,
     current_index: usize,
     show_mastered: bool,
+    is_pinned: bool,
     status_message: Option<(String, Instant)>,
     db_path: PathBuf,
 }
@@ -57,12 +58,14 @@ impl LinguoGuiApp {
             cards: Vec::new(),
             current_index: 0,
             show_mastered: false,
+            is_pinned: false,
             status_message: None,
             db_path,
         };
         app.reload_cards();
         app
     }
+
 
     fn reload_cards(&mut self) {
         match load_cards_from_db(&self.db_path) {
@@ -208,6 +211,13 @@ impl eframe::App for LinguoGuiApp {
             if i.key_pressed(egui::Key::M) {
                 self.toggle_master();
             }
+            if i.key_pressed(egui::Key::P) {
+                self.is_pinned = !self.is_pinned;
+                let level = if self.is_pinned { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+                let status = if self.is_pinned { "📌 Window pinned always-on-top" } else { "📍 Window unpinned" };
+                self.set_status(status);
+            }
             if i.key_pressed(egui::Key::F5) {
                 self.reload_cards();
             }
@@ -227,6 +237,14 @@ impl eframe::App for LinguoGuiApp {
                 ui.horizontal(|ui| {
                     ui.heading(RichText::new("🎮 LINGUO // ARCADE DECK").color(gold).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let pin_lbl = if self.is_pinned { "📌 Pinned" } else { "📍 Pin (P)" };
+                        if ui.button(RichText::new(pin_lbl).color(if self.is_pinned { gold } else { Color32::GRAY })).clicked() {
+                            self.is_pinned = !self.is_pinned;
+                            let level = if self.is_pinned { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+                            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+                            let status = if self.is_pinned { "📌 Window pinned always-on-top" } else { "📍 Window unpinned" };
+                            self.set_status(status);
+                        }
                         if ui.button("🔄 Reload").clicked() {
                             self.reload_cards();
                         }
@@ -235,6 +253,8 @@ impl eframe::App for LinguoGuiApp {
                         }
                     });
                 });
+
+
 
                 ui.add_space(8.0);
 

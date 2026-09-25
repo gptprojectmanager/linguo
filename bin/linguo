@@ -241,7 +241,25 @@ def init_db():
                 is_mastered INTEGER DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS card_archetypes (
+                category TEXT PRIMARY KEY,
+                sprite_name TEXT NOT NULL,
+                card_title TEXT NOT NULL,
+                cefr_level TEXT DEFAULT 'B1',
+                card_type TEXT NOT NULL,
+                front_challenge TEXT NOT NULL,
+                back_solution TEXT NOT NULL,
+                british_council_rule TEXT NOT NULL,
+                gag_quote TEXT,
+                thai_script TEXT NOT NULL,
+                thai_phonetic TEXT NOT NULL,
+                thai_tones TEXT NOT NULL,
+                thai_breakdown TEXT
+            )
+        """)
         # Schema migration: ensure any older tables gain new columns if missing
+
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(history)")
         columns = [row[1] for row in cursor.fetchall()]
@@ -1188,6 +1206,54 @@ ARCHETYPES = {
 }
 
 
+def seed_archetypes_if_needed():
+    """Seeds default archetypes into SQLite card_archetypes table if empty."""
+    with sqlite3.connect(DB_PATH) as conn:
+        for cat, data in ARCHETYPES.items():
+            conn.execute("""
+                INSERT OR IGNORE INTO card_archetypes (
+                    category, sprite_name, card_title, cefr_level, card_type,
+                    front_challenge, back_solution, british_council_rule, gag_quote,
+                    thai_script, thai_phonetic, thai_tones, thai_breakdown
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cat, data["sprite"], data["title"], data["cefr"], data["type"],
+                data["front_challenge"], data["back_solution"], data["rule"], data["gag"],
+                data["thai_script"], data["thai_phonetic"], data["thai_tones"], data["thai_breakdown"]
+            ))
+        conn.commit()
+
+
+def get_archetype(category: str) -> dict:
+    """Dynamically loads archetype from SQLite table, falling back to Python defaults."""
+    cat = category.upper().strip()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM card_archetypes WHERE category = ?", (cat,))
+            row = cur.fetchone()
+            if row:
+                return {
+                    "sprite": row["sprite_name"],
+                    "title": row["card_title"],
+                    "cefr": row["cefr_level"],
+                    "type": row["card_type"],
+                    "front_challenge": row["front_challenge"],
+                    "back_solution": row["back_solution"],
+                    "rule": row["british_council_rule"],
+                    "gag": row["gag_quote"],
+                    "thai_script": row["thai_script"],
+                    "thai_phonetic": row["thai_phonetic"],
+                    "thai_tones": row["thai_tones"],
+                    "thai_breakdown": row["thai_breakdown"],
+                }
+    except Exception:
+        pass
+    return ARCHETYPES.get(cat, ARCHETYPES.get("VERB_PATTERNS"))
+
+
 def classify_error(row: dict) -> str:
     cat = (row.get("error_category") or "").upper().strip()
     if cat and cat not in ("NONE", ""):
@@ -1212,6 +1278,7 @@ def classify_error(row: dict) -> str:
 
 def audit_gaps(limit: int = 50, force: bool = False):
     init_db()
+    seed_archetypes_if_needed()
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -1241,18 +1308,25 @@ def audit_gaps(limit: int = 50, force: bool = False):
 
         for cat, items in clusters.items():
             freq = len(items)
-            arch = ARCHETYPES.get(cat, ARCHETYPES["VERB_PATTERNS"])
+            arch = get_archetype(cat)
             src_ids = ",".join(str(it["id"]) for it in items)
 
-            cur.execute("SELECT id, source_history_ids FROM cards WHERE error_category = ? AND is_mastered = 0", (cat,))
+            cur.execute("SELECT id, source_history_ids, is_mastered FROM cards WHERE error_category = ?", (cat,))
             existing = cur.fetchone()
 
             if existing and not force:
                 card_id = existing["id"]
-                cur.execute("UPDATE cards SET source_history_ids = ? WHERE id = ?", (src_ids, card_id))
-                updated_count += 1
-                print(f"  • \033[1;33m[{cat}]\033[0m {arch['title']} (Card #{card_id} aggiornata, {freq} occorrenze: #{src_ids})")
+                was_mastered = bool(existing["is_mastered"])
+                if was_mastered:
+                    cur.execute("UPDATE cards SET is_mastered = 0, source_history_ids = ? WHERE id = ?", (src_ids, card_id))
+                    updated_count += 1
+                    print(f"  ⚠️ \033[1;31m[REACTIVATION]\033[0m {arch['title']} (Card #{card_id} riattivata nel mazzo attivo, {freq} errori recenti: #{src_ids})")
+                else:
+                    cur.execute("UPDATE cards SET source_history_ids = ? WHERE id = ?", (src_ids, card_id))
+                    updated_count += 1
+                    print(f"  • \033[1;33m[{cat}]\033[0m {arch['title']} (Card #{card_id} aggiornata, {freq} occorrenze: #{src_ids})")
             else:
+
                 cur.execute("""
                     INSERT INTO cards (
                         error_category, sprite_name, card_title, cefr_level, card_type,
@@ -1367,28 +1441,94 @@ def show_cards(card_id: int | None = None, flip: bool = False, master_id: int | 
 
 
 SURVIVAL_THAI_BRICKS = [
-    "ขอบคุณครับ",      # Grazie (M)
+    # 1. Cortesia & Fondamentali (Greetings & Courtesy)
     "สวัสดีครับ",      # Ciao / Buongiorno (M)
+    "ขอบคุณครับ",      # Grazie (M)
+    "ขอโทษครับ",      # Scusa / Mi scusi (M)
+    "ไม่เป็นไร",        # Di nulla / Non fa niente
+    "ใช่",             # Sì
+    "ไม่ใช่",          # No
+    "ยินดีครับ",        # Con piacere / Benvenuto
+
+    # 2. Acquisti & Denaro (Shopping & Bargaining)
     "เท่าไหร่ครับ",     # Quanto costa?
+    "แพงไป",          # Troppo caro
+    "ลดได้ไหม",        # Puoi fare uno sconto?
     "เช็คบิลด้วยครับ",   # Il conto per favore
-    "ห้องน้ำอยู่ที่ไหน",   # Dov'è il bagno?
+    "เอาอันนี้",         # Prendo questo
+    "ไม่เอา",          # Non lo voglio
+    "มีไหม",           # C'è? / Ne avete?
+    "ไม่มี",           # Non c'è / Non ne ho
+
+    # 3. Cibo & Bevande (Food & Dining)
+    "น้ำเปล่า",        # Acqua liscia
+    "น้ำแข็ง",         # Ghiaccio
     "ไม่เผ็ด",         # Non piccante
     "เผ็ดนิดหน่อย",     # Poco piccante
+    "เผ็ดมาก",         # Molto piccante
     "อร่อยมาก",        # Molto buono
-    "น้ำเปล่า",        # Acqua liscia
-    "อยากไป",         # Voglio andare
-    "อยากกิน",        # Voglio mangiare
-    "เข้าใจ",          # Capito
-    "ไม่เข้าใจ",       # Non ho capito
-    "ช่วยด้วย",        # Aiuto!
+    "หิวข้าว",         # Ho fame
+    "อิ่มแล้ว",         # Sono sazio
+    "กินข้าว",         # Mangiare
+    "กาแฟ",          # Caffè
+    "ชาเย็น",         # Tè freddo thai
+    "มังสวิรัติ",        # Vegetariano
+
+    # 4. Spostamenti & Taxi (Directions & Transport)
+    "ห้องน้ำอยู่ที่ไหน",   # Dov'è il bagno?
+    "ไปไหน",          # Dove vai?
     "ไปตลาด",         # Andare al mercato
-    "ขึ้นรถ",          # Salire sull'auto/bus
-    "โรงแรม",         # Hotel
-    "สนามบิน",        # Aeroporto
+    "ไปสนามบิน",       # Andare all'aeroporto
+    "ไปโรงแรม",        # Andare all'hotel
+    "ขึ้นรถ",          # Salire a bordo
+    "ลงที่นี่",          # Scendere qui
+    "จอดที่นี่",         # Fermati qui
     "เลี้ยวซ้าย",      # Gira a sinistra
     "เลี้ยวขวา",       # Gira a destra
     "ตรงไป",          # Vai dritto
+    "ใกล้",            # Vicino
+    "ไกล",            # Lontano
+    "เปิดมิเตอร์ด้วยครับ", # Accendi il tassametro per favore
+    "สถานีรถไฟ",       # Stazione dei treni
+    "สถานีรถไฟฟ้า",     # Stazione BTS/Skytrain
+
+    # 5. Intenzioni & Azioni Comuni (Verbs & Intentions)
+    "อยากไป",         # Voglio andare
+    "อยากกิน",        # Voglio mangiare
+    "อยากทำ",         # Voglio fare
+    "ชอบ",            # Mi piace
+    "ไม่ชอบ",         # Non mi piace
+    "เข้าใจ",          # Capito
+    "ไม่เข้าใจ",       # Non ho capito
+    "พูดภาษาอังกฤษได้ไหม", # Parli inglese?
+    "ช่วยด้วย",        # Aiuto!
+    "ไปแล้ว",          # Già andato
+    "รอแป๊บหนึ่ง",      # Aspetta un attimo
+    "กลับบ้าน",        # Tornare a casa
+
+    # 6. Numeri Essenziali (Numbers)
+    "หนึ่ง",           # 1
+    "สอง",            # 2
+    "สาม",            # 3
+    "สี่",             # 4
+    "ห้า",             # 5
+    "หก",             # 6
+    "เจ็ด",            # 7
+    "แปด",            # 8
+    "เก้า",            # 9
+    "สิบ",             # 10
+    "ยี่สิบ",           # 20
+    "ร้อย",            # 100
+    "พัน",            # 1000
+
+    # 7. Emergenze & Salute (Emergency & Health)
+    "โรงพยาบาล",       # Ospedale
+    "ร้านขายยา",       # Farmacia
+    "ปวดหัว",          # Mal di testa
+    "ปวดท้อง",         # Mal di pancia
+    "แพ้อาหาร",        # Allergia alimentare
 ]
+
 
 
 def preseed_thai_cache():
