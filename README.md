@@ -389,10 +389,11 @@ linguo --board                   # Open curses terminal board (lb)
 
 # Operational Configuration Matrix
 linguo config                    # Display full operational matrix table
-linguo config model <fast|balanced|pro>  # Set LLM tier (Flash 3.6 / 3.7 / 3.8)
+linguo config model <fast|balanced|pro>  # Set Real-Time Coach tier (Flash 3.6 / 3.7 / 3.8)
+linguo config card <canon|balanced|studio> # Set Card Production quality (0 Token / 3.7 / 3.8 High)
 linguo config tts <hybrid|local|edge>    # Set speech synthesis engine
 linguo config speed <0.75|0.8|1.0>       # Set didactic playback pace
-linguo config voice <nicole|bella|samantha> # Set English voice persona
+linguo config voice <nicole|samantha|adam|alex> # Set English voice (2 female + 2 male)
 linguo config route <auto|dell|local>    # Set network dispatch cascade
 linguo config reset              # Restore all parameters to canonical defaults
 

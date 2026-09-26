@@ -315,12 +315,13 @@ DEFAULT_CONFIG = {
     "hotkey": "<ctrl>+<alt>+<space>",
     "auto_paste": True,
     "sound_feedback": True,
-    "tts_engine": "hybrid",  # "hybrid" = Kokoro-82M (English local, 1-core) + Edge-TTS (Thai studio)
-    "eng_voice": "af_nicole", # Warm velvety Kokoro voice
+    "tts_engine": "hybrid",  # "hybrid" = Kokoro-82M (English local, 2-core) + Edge-TTS (Thai studio)
+    "eng_voice": "af_nicole", # "af_nicole" | "Samantha" | "am_adam" | "Alex"
     "thai_voice": "th-TH-PremwadeeNeural", # Edge-TTS Thai voice
     "speed": 0.8,            # 0.8x playback speed for clear didactic articulation
     "notifications": True,
-    "model": "gemini-3.6-flash-low",
+    "model": "gemini-3.6-flash-low",       # Real-time coach model (Fast 3.6 / Balanced 3.7 / Deep 3.8)
+    "card_model": "gemini-3.8-flash-high", # Card & Graphic production quality (canon / 3.7 / 3.8)
     "dispatch_mode": "auto"  # "auto" | "dell" | "local"
 }
 
@@ -352,6 +353,7 @@ def show_config_cli(subargs: list[str]):
     if not subargs:
         print("\n\033[1;34m─── Linguo Configuration Matrix (Operativo) ───\033[0m")
         model = cfg.get("model", "gemini-3.6-flash-low")
+        card_model = cfg.get("card_model", "gemini-3.8-flash-high")
         tts = cfg.get("tts_engine", "hybrid")
         speed = cfg.get("speed", 0.8)
         eng_voice = cfg.get("eng_voice", "af_nicole")
@@ -362,18 +364,19 @@ def show_config_cli(subargs: list[str]):
         notify = cfg.get("notifications", True)
         hotkey = cfg.get("hotkey", "<ctrl>+<alt>+<space>")
 
-        print(f"  \033[1m1. LLM Model:\033[0m        \033[1;32m{model:<22}\033[0m [Opzioni: gemini-3.6-flash-low (eco), gemini-3.7-flash-medium (balanced), gemini-3.8-flash-high (pro)]")
-        print(f"  \033[1m2. TTS Engine:\033[0m       \033[1;32m{tts:<22}\033[0m [Opzioni: hybrid (Kokoro+Edge), local (Say offline), edge (Azure Cloud)]")
-        print(f"  \033[1m3. Playback Speed:\033[0m   \033[1;32m{str(speed) + 'x':<22}\033[0m [Opzioni: 0.75 (lenta), 0.8 (didattica), 1.0 (naturale)]")
-        print(f"  \033[1m4. English Voice:\033[0m    \033[1;32m{eng_voice:<22}\033[0m [Opzioni: af_nicole (British), af_bella (American), Samantha (System)]")
-        print(f"  \033[1m5. Thai Voice:\033[0m       \033[1;32m{thai_voice:<22}\033[0m [Opzioni: th-TH-PremwadeeNeural (Edge Studio), Kanya (Say offline)]")
-        print(f"  \033[1m6. Dispatch Route:\033[0m   \033[1;32m{route:<22}\033[0m [Opzioni: auto (Cascade WG->CF->Local), dell (Force Server), local (Force Mac)]")
-        print(f"  \033[1m7. Auto-Paste:\033[0m       \033[1;32m{str(auto_paste):<22}\033[0m [Opzioni: on, off]")
-        print(f"  \033[1m8. Sound Feedback:\033[0m   \033[1;32m{str(sound):<22}\033[0m [Opzioni: on, off]")
-        print(f"  \033[1m9. Notifications:\033[0m    \033[1;32m{str(notify):<22}\033[0m [Opzioni: on, off]")
-        print(f" \033[1m10. Global Hotkey:\033[0m    \033[1;32m{hotkey:<22}\033[0m")
+        print(f"  \033[1m1. Coach Model:\033[0m       \033[1;32m{model:<22}\033[0m [Opzioni: gemini-3.6-flash-low (⚡ Fast 3.6 Low), gemini-3.7-flash-medium (⚖️ Balanced), gemini-3.8-flash-high (🧠 Deep 3.8 Pro)]")
+        print(f"  \033[1m2. Card Production:\033[0m   \033[1;32m{card_model:<22}\033[0m [Opzioni: canon (⚡ 0 Token / Istantaneo), gemini-3.7-flash-medium (⚖️ Balanced), gemini-3.8-flash-high (🔬 Studio High)]")
+        print(f"  \033[1m3. TTS Engine:\033[0m        \033[1;32m{tts:<22}\033[0m [Opzioni: hybrid (Kokoro+Edge), local (Say offline), edge (Azure Cloud)]")
+        print(f"  \033[1m4. Playback Speed:\033[0m    \033[1;32m{str(speed) + 'x':<22}\033[0m [Opzioni: 0.75 (lenta), 0.8 (didattica), 1.0 (naturale)]")
+        print(f"  \033[1m5. English Voice:\033[0m     \033[1;32m{eng_voice:<22}\033[0m [Opzioni: 👩 af_nicole (Studio Neural), 👩 Samantha (macOS Built-in), 👨 am_adam (Studio Neural), 👨 Alex (macOS Built-in)]")
+        print(f"  \033[1m6. Thai Voice:\033[0m        \033[1;32m{thai_voice:<22}\033[0m [Opzioni: th-TH-PremwadeeNeural (Edge Studio), Kanya (Say offline)]")
+        print(f"  \033[1m7. Dispatch Route:\033[0m    \033[1;32m{route:<22}\033[0m [Opzioni: auto (Cascade WG->CF->Local), dell (Force Server), local (Force Mac)]")
+        print(f"  \033[1m8. Auto-Paste:\033[0m        \033[1;32m{str(auto_paste):<22}\033[0m [Opzioni: on, off]")
+        print(f"  \033[1m9. Sound Feedback:\033[0m    \033[1;32m{str(sound):<22}\033[0m [Opzioni: on, off]")
+        print(f" \033[1m10. Notifications:\033[0m     \033[1;32m{str(notify):<22}\033[0m [Opzioni: on, off]")
+        print(f" \033[1m11. Global Hotkey:\033[0m     \033[1;32m{hotkey:<22}\033[0m")
         print(f"\n📁 File di configurazione: \033[36m{CONFIG_PATH}\033[0m")
-        print("💡 Modifica: \033[1mlinguo config <parametro> <valore>\033[0m  (es: linguo config model pro, linguo config speed 1.0, linguo config reset)\n")
+        print("💡 Modifica: \033[1mlinguo config <parametro> <valore>\033[0m  (es: linguo config model balanced, linguo config card canon, linguo config voice adam)\n")
         return
 
     key = subargs[0].lower().strip()
@@ -388,7 +391,7 @@ def show_config_cli(subargs: list[str]):
         print(f"⚠️ Specifica un valore per '{key}'. Esempio: linguo config {key} <valore>")
         return
 
-    if key in ("model", "llm", "engine-llm"):
+    if key in ("model", "llm", "engine-llm", "coach_model"):
         if val in ("fast", "eco", "low", "3.6", "gemini-3.6-flash-low"):
             cfg["model"] = "gemini-3.6-flash-low"
         elif val in ("balanced", "medium", "3.7", "gemini-3.7-flash-medium"):
@@ -398,7 +401,19 @@ def show_config_cli(subargs: list[str]):
         else:
             cfg["model"] = subargs[1]
         save_config(cfg)
-        print(f"✅ LLM Model impostato su: \033[1;32m{cfg['model']}\033[0m")
+        print(f"✅ Real-Time Coach Model impostato su: \033[1;32m{cfg['model']}\033[0m")
+
+    elif key in ("card", "card_model", "cards_model", "audit_model"):
+        if val in ("canon", "none", "fast", "0", "zero", "offline"):
+            cfg["card_model"] = "canon"
+        elif val in ("balanced", "3.7", "gemini-3.7-flash-medium"):
+            cfg["card_model"] = "gemini-3.7-flash-medium"
+        elif val in ("pro", "deep", "studio", "3.8", "gemini-3.8-flash-high"):
+            cfg["card_model"] = "gemini-3.8-flash-high"
+        else:
+            cfg["card_model"] = subargs[1]
+        save_config(cfg)
+        print(f"✅ Card & Graphic Production Model impostato su: \033[1;32m{cfg['card_model']}\033[0m")
 
     elif key in ("tts", "tts_engine", "speech"):
         if val in ("hybrid", "kokoro-edge"):
@@ -429,10 +444,12 @@ def show_config_cli(subargs: list[str]):
     elif key in ("voice", "eng_voice", "english_voice"):
         if "nicole" in val:
             cfg["eng_voice"] = "af_nicole"
-        elif "bella" in val:
-            cfg["eng_voice"] = "af_bella"
         elif "samantha" in val:
             cfg["eng_voice"] = "Samantha"
+        elif "adam" in val:
+            cfg["eng_voice"] = "am_adam"
+        elif "alex" in val:
+            cfg["eng_voice"] = "Alex"
         else:
             cfg["eng_voice"] = subargs[1]
         save_config(cfg)
@@ -706,9 +723,13 @@ def run_worker(record_id: int):
     eng_ok = False
     thai_ok = False
 
-    # 1. Synthesize English Audio (Kokoro-82M on 1 CPU thread or Edge-TTS)
+    # 1. Synthesize English Audio (Kokoro-82M on 2 CPU threads, Edge-TTS, or macOS say)
     if eng_text:
-        if tts_engine in ("hybrid", "kokoro"):
+        voice = cfg.get("eng_voice", "af_nicole")
+        is_macos_voice = voice in ("Samantha", "Alex", "Victoria", "Daniel")
+
+        # Synthesize via Kokoro if Studio Neural voice and engine is hybrid/kokoro
+        if not is_macos_voice and tts_engine in ("hybrid", "kokoro"):
             try:
                 import torch
                 torch.set_num_threads(2)  # Dedicated 2 CPU cores for high performance & quiet operation
@@ -717,10 +738,8 @@ def run_worker(record_id: int):
                 import numpy as np
 
                 pipeline = KPipeline(lang_code='a')
-                voice = cfg.get("eng_voice", "af_nicole")
-                if not voice or voice in ("Samantha", "Alex", "Victoria"):
-                    voice = "af_nicole"
-                generator = pipeline(eng_text, voice=voice, speed=speed)
+                kokoro_voice = voice if voice in ("af_nicole", "am_adam") else "af_nicole"
+                generator = pipeline(eng_text, voice=kokoro_voice, speed=speed)
                 audio_chunks = [audio for _, _, audio in generator]
                 if audio_chunks:
                     tmp_wav = AUDIO_DIR / f"eng_tmp_{record_id}.wav"
@@ -731,10 +750,10 @@ def run_worker(record_id: int):
             except Exception as e:
                 sys.stderr.write(f"Kokoro failed: {e}\n")
 
-        # Fallback to Edge-TTS if not yet generated
-        if not eng_ok and tts_engine != "local":
+        # Fallback to Edge-TTS if not yet generated and not local engine
+        if not eng_ok and not is_macos_voice and tts_engine != "local":
             try:
-                v = cfg.get("edge_eng_voice", "en-US-JennyNeural")
+                v = "en-US-GuyNeural" if voice == "am_adam" else cfg.get("edge_eng_voice", "en-US-JennyNeural")
                 subprocess.run([
                     "edge-tts",
                     "--voice", v,
@@ -746,12 +765,13 @@ def run_worker(record_id: int):
             except Exception:
                 pass
 
-        # Final fallback to local say
+        # Final fallback or primary if built-in macOS voice
         if not eng_ok:
             try:
+                say_voice = voice if is_macos_voice else ("Alex" if "adam" in voice or "male" in voice else "Samantha")
                 say_rate = str(int(175 * speed))
                 tmp_aiff = AUDIO_DIR / f"eng_tmp_{record_id}.aiff"
-                subprocess.run(["say", "-v", "Samantha", "-r", say_rate, eng_text, "-o", str(tmp_aiff)], timeout=5.0)
+                subprocess.run(["say", "-v", say_voice, "-r", say_rate, eng_text, "-o", str(tmp_aiff)], timeout=5.0)
                 if tmp_aiff.exists():
                     subprocess.run([ffmpeg_bin, "-i", str(tmp_aiff), "-y", str(eng_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     tmp_aiff.unlink(missing_ok=True)
@@ -1748,12 +1768,21 @@ Output MUST be a single valid JSON object only with exactly these keys:
 }}
 """
 
+    cfg = load_config()
+    card_model = cfg.get("card_model", "gemini-3.8-flash-high")
+    if card_model in ("canon", "none", "fast", "0", "zero", "offline"):
+        log_event("INFO", "GATE3_AUDIT_SKIP", "Using deterministic canonical archetype (0 extra tokens)")
+        return None
+
+    model_name = "gemini-3.7-flash-medium" if "3.7" in card_model else "gemini-3.8-flash-high"
+    effort_level = "medium" if "3.7" in card_model else "high"
+
     workspace = DATA_DIR / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     cmd = [
         "agy",
-        "--model", "gemini-3.8-flash-high",
-        "--effort", "high",
+        "--model", model_name,
+        "--effort", effort_level,
         "--dangerously-skip-permissions",
         "--disable-slash-commands",
         "--output-format", "json",

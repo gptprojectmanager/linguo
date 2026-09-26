@@ -8,18 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚙️ Interactive Configuration Matrix (GUI & CLI)
 - **Settings & Configuration Modal (`⚙️ Config` / `[C]`)**:
-  - Interactive configuration matrix in `dash-gui` with 2–3 discrete options for each operational domain:
-    1. **LLM Model Tier**: `gemini-3.6-flash-low` (Eco Fast, default), `gemini-3.7-flash-medium` (Balanced), `gemini-3.8-flash-high` (Deep Pro).
-    2. **TTS Speech Engine**: `hybrid` (Kokoro + Edge-TTS, default), `local` (macOS offline Say), `edge` (Azure Cloud).
-    3. **Playback Speed**: `0.75x` (Lenta), `0.80x` (Didattica, default), `1.00x` (Naturale).
-    4. **English Voice Persona**: `af_nicole` (British Velvety, default), `af_bella` (American Crisp), `Samantha` (macOS System).
-    5. **Network Routing Dispatch**: `auto` (Cascade: WireGuard -> Cloudflare -> Local Mac, default), `dell` (Force Server), `local` (Force Mac).
-    6. **Client Automation Toggles**: `auto_paste` (Cmd+V), `sound_feedback`, `notifications`.
+  - Interactive configuration matrix in `dash-gui` with discrete options across 7 operational domains:
+    1. **Real-Time Coach Model**: `gemini-3.6-flash-low` (⚡ Fast 3.6 Low, default), `gemini-3.7-flash-medium` (⚖️ Balanced 3.7), `gemini-3.8-flash-high` (🧠 Deep 3.8 Pro).
+    2. **Card & Graphic Production (Token Gate)**: `canon` (⚡ Canonico 0 Token, instant SQLite archetypes), `gemini-3.7-flash-medium` (⚖️ Balanced 3.7), `gemini-3.8-flash-high` (🔬 Studio 3.8 High, default).
+    3. **TTS Speech Engine**: `hybrid` (Kokoro + Edge-TTS, default), `local` (macOS offline Say), `edge` (Azure Cloud).
+    4. **Playback Speed**: `0.75x` (Lenta), `0.80x` (Didattica, default), `1.00x` (Naturale).
+    5. **English Voice & Quality (Dropdown)**:
+       - 👩 **Nicole**: `af_nicole` [Studio Neural 24kHz • Kokoro British Female, default]
+       - 👩 **Samantha**: `Samantha` [macOS Built-in • Apple System American Female]
+       - 👨 **Adam**: `am_adam` [Studio Neural 24kHz • Kokoro American Male]
+       - 👨 **Alex**: `Alex` [macOS Built-in • Apple System American Male]
+    6. **Network Routing Dispatch**: `auto` (Cascade: WireGuard -> Cloudflare -> Local Mac, default), `dell` (Force Server), `local` (Force Mac).
+    7. **Client Automation Toggles**: `auto_paste` (Cmd+V), `sound_feedback`, `notifications`.
   - Immediate atomic persistence to `~/.local/share/linguo/config.json`.
-  - Factory reset button ("Ripristina Predefiniti") restoring defaults across all parameters.
+  - Factory reset button ("Ripristina Predefiniti") restoring canonical defaults.
 - **Unified CLI Configuration Engine (`linguo config`)**:
   - Terminal matrix inspection: `linguo config`.
-  - Subcommands: `linguo config model <fast|balanced|pro>`, `linguo config speed <0.75|0.8|1.0>`, `linguo config route <auto|dell|local>`, `linguo config reset`.
+  - Subcommands: `linguo config model <fast|balanced|pro>`, `linguo config card <canon|balanced|studio>`, `linguo config voice <nicole|samantha|adam|alex>`, `linguo config speed <0.75|0.8|1.0>`, `linguo config route <auto|dell|local>`, `linguo config reset`.
 - **Menu Bar Context Menu Integration**:
   - Added "⚙️ Impostazioni Config..." item to the right-click menu of the 🎙️ menu bar accessory.
 

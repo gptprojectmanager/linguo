@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 pub struct LinguoConfig {
     #[serde(default = "default_model")]
     pub model: String,
+    #[serde(default = "default_card_model")]
+    pub card_model: String,
     #[serde(default = "default_tts_engine")]
     pub tts_engine: String,
     #[serde(default = "default_speed")]
@@ -31,6 +33,7 @@ pub struct LinguoConfig {
 }
 
 fn default_model() -> String { "gemini-3.6-flash-low".to_string() }
+fn default_card_model() -> String { "gemini-3.8-flash-high".to_string() }
 fn default_tts_engine() -> String { "hybrid".to_string() }
 fn default_speed() -> f32 { 0.8 }
 fn default_eng_voice() -> String { "af_nicole".to_string() }
@@ -43,6 +46,7 @@ impl Default for LinguoConfig {
     fn default() -> Self {
         Self {
             model: default_model(),
+            card_model: default_card_model(),
             tts_engine: default_tts_engine(),
             speed: default_speed(),
             eng_voice: default_eng_voice(),
@@ -242,7 +246,9 @@ impl LinguoGuiApp {
                 let db_path = self.db_path.clone();
                 let source_ids = card.source_history_ids.clone();
                 let solution_text = card.back_solution.clone();
-                self.set_status("Playing English audio (Nicole 0.8x / Samantha)...");
+                let voice = self.config.eng_voice.clone();
+                let speed = self.config.speed;
+                self.set_status("Playing English audio...");
 
                 std::thread::spawn(move || {
                     let mut played = false;
@@ -266,7 +272,12 @@ impl LinguoGuiApp {
                         }
                     }
                     if !played {
-                        let _ = Command::new("say").args(["-v", "Samantha", "-r", "165", &solution_text]).status();
+                        let say_voice = match voice.as_str() {
+                            "Alex" | "am_adam" => "Alex",
+                            _ => "Samantha",
+                        };
+                        let rate = ((speed / 0.8) * 165.0).round() as i32;
+                        let _ = Command::new("say").args(["-v", say_voice, "-r", &rate.to_string(), &solution_text]).status();
                     }
                 });
             }
@@ -341,8 +352,12 @@ impl LinguoGuiApp {
                                 // Play English speech via macOS say
                                 let eng_clean = ana.corrected_english.replace('\'', "");
                                 let eng_rate = ((cfg_clone.speed / 0.8) * 165.0).round() as i32;
+                                let say_voice = match cfg_clone.eng_voice.as_str() {
+                                    "Alex" | "am_adam" => "Alex",
+                                    _ => "Samantha",
+                                };
                                 let _ = Command::new("say")
-                                    .args(["-v", "Samantha", "-r", &eng_rate.to_string(), &eng_clean])
+                                    .args(["-v", say_voice, "-r", &eng_rate.to_string(), &eng_clean])
                                     .spawn();
 
                                 // Play Thai speech via macOS say
@@ -759,17 +774,26 @@ impl eframe::App for LinguoGuiApp {
                     ui.separator();
                     ui.add_space(6.0);
 
-                    // 1. LLM Model Tier
-                    ui.label(RichText::new("1. LLM Inference Model (Gemini / AGY)").color(modal_cyan).strong());
+                    // 1. Real-Time Coach Model (Inference Brain)
+                    ui.label(RichText::new("1. Real-Time Coach Model (Inference Brain)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.6-flash-low".to_string(), "⚡ Eco Fast (Flash 3.6)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced (Flash 3.7)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "🧠 Deep Pro (Flash 3.8)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.6-flash-low".to_string(), "⚡ Fast 3.6 Low").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced 3.7").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "🧠 Deep 3.8 Pro").clicked();
                     });
                     ui.add_space(8.0);
 
-                    // 2. Audio Speech Engine
-                    ui.label(RichText::new("2. Speech Engine (TTS Synthesis)").color(modal_cyan).strong());
+                    // 2. Card Production & Graphic Tier (Token Optimization)
+                    ui.label(RichText::new("2. Card & Graphic Production (Token Gate)").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.card_model, "canon".to_string(), "⚡ Canonico (0 Token)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced (3.7)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.8-flash-high".to_string(), "🔬 Studio Pro (3.8 High)").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 3. Audio Speech Engine
+                    ui.label(RichText::new("3. Speech Engine (TTS Synthesis)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.selectable_value(&mut self.config.tts_engine, "hybrid".to_string(), "✨ Hybrid Studio (Kokoro+Edge)").clicked();
                         changed |= ui.selectable_value(&mut self.config.tts_engine, "local".to_string(), "🔊 100% Offline (macOS Say)").clicked();
@@ -777,8 +801,8 @@ impl eframe::App for LinguoGuiApp {
                     });
                     ui.add_space(8.0);
 
-                    // 3. Playback Speed
-                    ui.label(RichText::new("3. Playback Speed (Didattica & Articolazione)").color(modal_cyan).strong());
+                    // 4. Playback Speed
+                    ui.label(RichText::new("4. Playback Speed (Didattica & Articolazione)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.selectable_value(&mut self.config.speed, 0.75, "0.75x Lenta").clicked();
                         changed |= ui.selectable_value(&mut self.config.speed, 0.80, "0.80x Didattica (Default)").clicked();
@@ -786,17 +810,49 @@ impl eframe::App for LinguoGuiApp {
                     });
                     ui.add_space(8.0);
 
-                    // 4. Voice Persona
-                    ui.label(RichText::new("4. English Voice Persona").color(modal_cyan).strong());
-                    ui.horizontal(|ui| {
-                        changed |= ui.selectable_value(&mut self.config.eng_voice, "af_nicole".to_string(), "Nicole (British Velvety)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.eng_voice, "af_bella".to_string(), "Bella (American Crisp)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.eng_voice, "Samantha".to_string(), "Samantha (macOS System)").clicked();
-                    });
+                    // 5. Voice Persona & Audio Quality (2 Femminili + 2 Maschili)
+                    ui.label(RichText::new("5. English Voice & Quality (2 Femminili + 2 Maschili)").color(modal_cyan).strong());
+                    let current_label = match self.config.eng_voice.as_str() {
+                        "af_nicole" => "👩 Nicole  [Studio Neural 24kHz • British Female]",
+                        "Samantha"  => "👩 Samantha  [macOS Built-in • American Female]",
+                        "am_adam"   => "👨 Adam  [Studio Neural 24kHz • American Male]",
+                        "Alex"      => "👨 Alex  [macOS Built-in • American Male]",
+                        _           => "👩 Nicole  [Studio Neural 24kHz • British Female]",
+                    };
+
+                    egui::ComboBox::from_id_salt("eng_voice_dropdown")
+                        .width(ui.available_width() - 10.0)
+                        .selected_text(RichText::new(current_label).color(Color32::WHITE))
+                        .show_ui(ui, |ui| {
+                            ui.label(RichText::new("── 👩 VOCI FEMMINILI ──").size(11.0).color(Color32::GRAY));
+                            changed |= ui.selectable_value(
+                                &mut self.config.eng_voice,
+                                "af_nicole".to_string(),
+                                "👩 Nicole — Studio Neural 24kHz (Kokoro British Female)",
+                            ).clicked();
+                            changed |= ui.selectable_value(
+                                &mut self.config.eng_voice,
+                                "Samantha".to_string(),
+                                "👩 Samantha — macOS Built-in (Apple System American Female)",
+                            ).clicked();
+
+                            ui.separator();
+                            ui.label(RichText::new("── 👨 VOCI MASCHILI ──").size(11.0).color(Color32::GRAY));
+                            changed |= ui.selectable_value(
+                                &mut self.config.eng_voice,
+                                "am_adam".to_string(),
+                                "👨 Adam — Studio Neural 24kHz (Kokoro American Male)",
+                            ).clicked();
+                            changed |= ui.selectable_value(
+                                &mut self.config.eng_voice,
+                                "Alex".to_string(),
+                                "👨 Alex — macOS Built-in (Apple System American Male)",
+                            ).clicked();
+                        });
                     ui.add_space(8.0);
 
-                    // 5. Network Routing Dispatch
-                    ui.label(RichText::new("5. Network Routing Dispatch").color(modal_cyan).strong());
+                    // 6. Network Routing Dispatch
+                    ui.label(RichText::new("6. Network Routing Dispatch").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.selectable_value(&mut self.config.dispatch_mode, "auto".to_string(), "🌐 Auto Cascade (WG->CF->Mac)").clicked();
                         changed |= ui.selectable_value(&mut self.config.dispatch_mode, "dell".to_string(), "🖥️ Dell Remote (Force Server)").clicked();
@@ -804,8 +860,8 @@ impl eframe::App for LinguoGuiApp {
                     });
                     ui.add_space(8.0);
 
-                    // 6. Automation & Feedback Toggles
-                    ui.label(RichText::new("6. Automazioni & Notifiche Client").color(modal_cyan).strong());
+                    // 7. Automation & Feedback Toggles
+                    ui.label(RichText::new("7. Automazioni & Notifiche Client").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.checkbox(&mut self.config.auto_paste, "Auto-Paste (Cmd+V)").changed();
                         changed |= ui.checkbox(&mut self.config.sound_feedback, "Audio Feedback").changed();
