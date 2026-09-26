@@ -86,10 +86,10 @@ cards_anki_export.tsv
 *.pid
 *.lock
 /tmp/linguo_*
-workspace/
-audio/
-logs/
-cache/
+/workspace/
+/audio/
+/logs/
+/cache/
 
 # Model weights & Large Binaries (Kokoro, HuggingFace, PyTorch, ONNX)
 *.pt
@@ -217,5 +217,5 @@ $RECYCLE.BIN/
 *~
 *.bak
 *.orig
-core
+/core
 vgcore.*

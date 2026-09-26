@@ -230,11 +230,13 @@ def run_isolated_e2e():
             capture_output=True
         )
         sandbox_anki = sandbox_data / "cards_anki_export.tsv"
+        sandbox_apkg = sandbox_data / "cards_anki_export.apkg"
         assert sandbox_anki.exists(), "Sandbox Anki export TSV was not created!"
+        assert sandbox_apkg.exists(), "Sandbox Anki export APKG was not created!"
         content = sandbox_anki.read_text(encoding="utf-8")
         assert "Front_Puzzle" in content
         assert "THE MARKET STAMP" in content
-        print(f"✅ Step 7: Sandbox DB verified: {card_count} card(s) minted, Anki TSV generated")
+        print(f"✅ Step 7: Sandbox DB verified: {card_count} card(s) minted, Anki TSV & APKG generated")
 
         # 10. Structured NDJSON Log Verification
         subprocess.run(

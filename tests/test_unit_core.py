@@ -317,3 +317,106 @@ class TestExportSystem:
         assert "Front_Puzzle" in content
         assert "THE MARKET STAMP" in content
 
+    def test_export_cards_apkg_and_all(self, monkeypatch, tmp_path):
+        import zipfile
+        db_file = tmp_path / "test_history.db"
+        monkeypatch.setattr(linguo, "DB_PATH", db_file)
+        monkeypatch.setattr(linguo, "DATA_DIR", tmp_path)
+        linguo.init_db()
+
+        # Export all formats (TSV + APKG)
+        linguo.export_cards("all")
+
+        tsv_path = tmp_path / "cards_anki_export.tsv"
+        apkg_path = tmp_path / "cards_anki_export.apkg"
+
+        assert tsv_path.exists(), "TSV export was not created"
+        assert apkg_path.exists(), "APKG export was not created"
+
+        # Validate APKG Zip archive contents
+        with zipfile.ZipFile(apkg_path, "r") as zf:
+            namelist = zf.namelist()
+            assert "collection.anki2" in namelist
+            assert "media" in namelist
+
+            # Extract collection.anki2 to inspect SQLite structure
+            anki_db_bytes = zf.read("collection.anki2")
+            temp_db = tmp_path / "unzipped_collection.anki2"
+            temp_db.write_bytes(anki_db_bytes)
+
+            with sqlite3.connect(temp_db) as aconn:
+                acur = aconn.cursor()
+                acur.execute("SELECT count(*) FROM notes;")
+                note_count = acur.fetchone()[0]
+                assert note_count >= 15, f"Expected at least 15 starter deck notes in APKG, found {note_count}"
+
+                acur.execute("SELECT count(*) FROM cards;")
+                card_count = acur.fetchone()[0]
+                assert card_count >= 15, f"Expected at least 15 starter deck cards in APKG, found {card_count}"
+
+
+class TestStarterDeck:
+    def test_starter_deck_card_integrity(self):
+        from linguo.core.starter_deck import STARTER_DECK, ARCHETYPES
+        assert len(STARTER_DECK) == 15, f"Expected 15 starter deck cards, found {len(STARTER_DECK)}"
+        assert len(ARCHETYPES) == 15, f"Expected 15 archetypes, found {len(ARCHETYPES)}"
+
+        categories = set()
+        for card in STARTER_DECK:
+            assert card["category"], "Card missing category"
+            assert card["title"], "Card missing title"
+            assert card["cefr"] in ("A1", "A2", "B1", "B2"), f"Invalid CEFR level: {card['cefr']}"
+            assert "[  ?  ]" in card["front_challenge"], "Card challenge missing [  ?  ] blank"
+            assert card["back_solution"], "Card missing back solution"
+            assert card["rule"], "Card missing British Council grammar rule"
+            assert card["gag"], "Card missing humorous arcade quote"
+            assert card["thai_script"], "Card missing Thai script"
+            assert card["thai_phonetic"], "Card missing Thai phonetics"
+            assert card["thai_tones"], "Card missing Thai tone sequence"
+            categories.add(card["category"])
+
+        assert len(categories) == 15, "Categories in starter deck must all be unique"
+
+    def test_starter_deck_cold_start_seeding(self, monkeypatch, tmp_path):
+        db_file = tmp_path / "cold_start.db"
+        monkeypatch.setattr(linguo, "DB_PATH", db_file)
+        linguo.init_db()
+
+        with sqlite3.connect(db_file) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM cards;")
+            count = cur.fetchone()[0]
+            assert count == 15, f"Expected 15 pre-seeded starter deck cards, got {count}"
+
+            # Idempotency check: calling init_db again does not duplicate cards
+            linguo.init_db()
+            cur.execute("SELECT count(*) FROM cards;")
+            count_after = cur.fetchone()[0]
+            assert count_after == 15, f"Cards duplicated on subsequent init_db: {count_after}"
+
+
+class TestModularArchitecture:
+    def test_subpackage_imports(self):
+        import linguo.core
+        import linguo.core.config
+        import linguo.core.db
+        import linguo.core.safety
+        import linguo.core.models
+        import linguo.core.telemetry
+        import linguo.core.starter_deck
+        import linguo.audio
+        import linguo.audio.engine
+        import linguo.pedagogy
+        import linguo.pedagogy.export
+        import linguo.platform
+        import linguo.platform.macos
+
+        assert hasattr(linguo.core, "load_config")
+        assert hasattr(linguo.core, "init_db")
+        assert hasattr(linguo.core, "STARTER_DECK")
+        assert hasattr(linguo.pedagogy, "export_apkg")
+        assert hasattr(linguo.pedagogy, "export_tsv")
+        assert hasattr(linguo.audio, "synthesize_english")
+        assert hasattr(linguo.platform, "copy_to_clipboard")
+
+

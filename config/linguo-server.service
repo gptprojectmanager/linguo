@@ -1,0 +1,34 @@
+[Unit]
+Description=Linguo High-Performance Dual English-Thai API Server & Kokoro TTS Engine
+After=network.target network-online.target systemd-journald.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sam
+Group=sam
+WorkingDirectory=/home/sam/linguo
+Environment="PATH=/home/sam/linguo/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="LINGUO_DATA_DIR=/home/sam/.local/share/linguo"
+Environment="LINGUO_WORKSPACE_DIR=/home/sam/.local/share/linguo/workspace"
+Environment="LINGUO_API_TOKEN=linguo-secret-key-2026-linguo-coach"
+ExecStart=/home/sam/linguo/.venv/bin/uvicorn scripts.linguo_server:app --host 0.0.0.0 --port 8765 --workers 2 --access-log
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3s
+
+# Resource and Sandbox Hardening
+LimitNOFILE=65536
+KillMode=mixed
+TimeoutStopSec=10s
+MemoryMax=4G
+CPUQuota=300%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=linguo-server
+
+[Install]
+WantedBy=multi-user.target

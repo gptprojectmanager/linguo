@@ -25,6 +25,14 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+
+_BIN_DIR = str(Path(__file__).resolve().parent)
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+while _BIN_DIR in sys.path:
+    sys.path.remove(_BIN_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 from datetime import datetime
 from typing import Literal, Optional
 from contextlib import contextmanager
@@ -588,6 +596,9 @@ def init_db():
                     conn.execute(f"ALTER TABLE history ADD COLUMN {col} {col_type}")
                 except Exception:
                     pass
+
+        seed_archetypes_if_needed(conn)
+        seed_starter_deck_if_needed(conn)
         conn.commit()
 
 
@@ -1662,85 +1673,14 @@ def show_history(limit: int = 5, as_json: bool = False):
 
 
 
-ARCHETYPES = {
-    "ARTICLES": {
-        "sprite": "the_stamp",
-        "title": "THE MARKET STAMP",
-        "type": "Arcade Encounter • Grammar: Definite Article",
-        "cefr": "B1",
-        "rule": "Specific physical destinations and local services take the definite article 'the' (the market, the station, the bank).",
-        "gag": "\"NO 'THE', NO ENTRY! Stamp approved, soldier!\"",
-        "thai_script": "ไปตลาด",
-        "thai_phonetic": "bpai dtà-làat",
-        "thai_tones": "M / L",
-        "thai_breakdown": "ไป = andare (Medio) | ตลาด = mercato (Basso)",
-        "front_challenge": "I am going to [  ?  ] market tomorrow.",
-        "back_solution": "I am going to THE market tomorrow."
-    },
-    "VERB_PATTERNS": {
-        "sprite": "the_to_toll",
-        "title": "THE 'TO' TOLL",
-        "type": "Arcade Encounter • Grammar: Verb Patterns",
-        "cefr": "B1",
-        "rule": "Verbs of intention ('want', 'need', 'decide', 'hope') require the to-infinitive pattern (want + to + base verb).",
-        "gag": "\"ACCESS DENIED! Insert 'TO' token into the machine to ignite the action!\"",
-        "thai_script": "อยากทำ",
-        "thai_phonetic": "yàak tham",
-        "thai_tones": "L / M",
-        "thai_breakdown": "อยาก = volere (Basso) | ทำ = fare (Medio)",
-        "front_challenge": "I want [  ?  ] refactor this code.",
-        "back_solution": "I want TO refactor this code."
-    },
-    "PREPOSITIONS": {
-        "sprite": "the_gerund_vest",
-        "title": "THE GERUND LIFE VEST",
-        "type": "Arcade Encounter • Grammar: Prepositions & Gerunds",
-        "cefr": "B1",
-        "rule": "Any verb directly following a preposition ('before', 'after', 'for', 'without') MUST take the gerund form (-ing).",
-        "gag": "\"MAN OVERBOARD! Verbs following prepositions drown without an -ING life vest!\"",
-        "thai_script": "ก่อนรวม",
-        "thai_phonetic": "gɔ̀ɔn ruam",
-        "thai_tones": "L / M",
-        "thai_breakdown": "ก่อน = prima (Basso) | รวม = unire (Medio)",
-        "front_challenge": "We should test before [  ?  ] the PR.",
-        "back_solution": "We should test before MERGING the PR."
-    },
-    "TENSES": {
-        "sprite": "the_time_paradox",
-        "title": "THE TIME PARADOX",
-        "type": "Arcade Encounter • Grammar: Past Simple",
-        "cefr": "A2",
-        "rule": "Completed actions in a finished time period ('yesterday', 'last week', 'ago') demand Past Simple.",
-        "gag": "\"TIME PARADOX! 'Yesterday' is in the past! Drop present tense before the continuum breaks!\"",
-        "thai_script": "ไปแล้ว",
-        "thai_phonetic": "bpai lɛ́ɛo",
-        "thai_tones": "M / H",
-        "thai_breakdown": "ไป = andare (Medio) | แล้ว = già / fatto (Alto)",
-        "front_challenge": "Yesterday I [  ?  ] to the market.",
-        "back_solution": "Yesterday I WENT to the market."
-    },
-    "AGREEMENT": {
-        "sprite": "the_lone_s_gun",
-        "title": "THE LONE S-GUN",
-        "type": "Arcade Encounter • Grammar: Subject-Verb Agreement",
-        "cefr": "A2",
-        "rule": "Third-person singular subjects and distributive determiners ('each', 'every') demand singular verb ending in '-s'.",
-        "gag": "\"REINFORCEMENTS! Singular subjects can't survive alone! Deploy the '-S' backup rifle!\"",
-        "thai_script": "ทุกคนมา",
-        "thai_phonetic": "thúk khon maa",
-        "thai_tones": "H / M / M",
-        "thai_breakdown": "ทุกคน = ciascuno/tutti | มา = venire",
-        "front_challenge": "Each child [  ?  ] to school.",
-        "back_solution": "Each child COMES to school."
-    }
-}
+from linguo.core.starter_deck import STARTER_DECK, ARCHETYPES
 
 
-def seed_archetypes_if_needed():
+def seed_archetypes_if_needed(conn: sqlite3.Connection = None):
     """Seeds default archetypes into SQLite card_archetypes table if empty."""
-    with sqlite3.connect(DB_PATH) as conn:
+    def _seed(c):
         for cat, data in ARCHETYPES.items():
-            conn.execute("""
+            c.execute("""
                 INSERT OR IGNORE INTO card_archetypes (
                     category, sprite_name, card_title, cefr_level, card_type,
                     front_challenge, back_solution, british_council_rule, gag_quote,
@@ -1752,7 +1692,41 @@ def seed_archetypes_if_needed():
                 data["front_challenge"], data["back_solution"], data["rule"], data["gag"],
                 data["thai_script"], data["thai_phonetic"], data["thai_tones"], data["thai_breakdown"]
             ))
-        conn.commit()
+        c.commit()
+
+    if conn is not None:
+        _seed(conn)
+    else:
+        with sqlite3.connect(DB_PATH) as c:
+            _seed(c)
+
+
+def seed_starter_deck_if_needed(conn: sqlite3.Connection = None):
+    """Seeds the 15 canonical CEFR A1-B2 cards into the cards table on cold start."""
+    def _seed(c):
+        cur = c.cursor()
+        cur.execute("SELECT count(*) FROM cards;")
+        if cur.fetchone()[0] == 0:
+            for card in STARTER_DECK:
+                cur.execute("""
+                    INSERT INTO cards (
+                        error_category, sprite_name, card_title, cefr_level, card_type,
+                        front_challenge, back_solution, british_council_rule, gag_quote,
+                        thai_script, thai_phonetic, thai_tones, thai_breakdown,
+                        source_history_ids, is_mastered
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+                """, (
+                    card["category"], card["sprite"], card["title"], card["cefr"], card["type"],
+                    card["front_challenge"], card["back_solution"], card["rule"], card["gag"],
+                    card["thai_script"], card["thai_phonetic"], card["thai_tones"], card["thai_breakdown"]
+                ))
+            c.commit()
+
+    if conn is not None:
+        _seed(conn)
+    else:
+        with sqlite3.connect(DB_PATH) as c:
+            _seed(c)
 
 
 def get_archetype(category: str) -> dict:
@@ -2209,39 +2183,32 @@ def preseed_thai_cache():
     print(f"📁 Directory cache: \033[90m{thai_cache_dir}\033[0m\n")
 
 
-def export_cards(format_type: str = "anki"):
-    """Exports cards to an Anki-compatible TSV file."""
+def export_cards(format_type: str = "all"):
+    """Exports cards to an Anki-compatible TSV and/or native .apkg file."""
+    from linguo.pedagogy.export import export_tsv as _export_tsv, export_apkg as _export_apkg
     init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM cards ORDER BY id ASC")
-        rows = cur.fetchall()
 
-    if not rows:
-        print("❌ Nessuna carta da esportare.")
-        return
+    format_type = format_type.lower().strip() if format_type else "all"
+    tsv_path = DATA_DIR / "cards_anki_export.tsv"
+    apkg_path = DATA_DIR / "cards_anki_export.apkg"
 
-    import csv
-    export_file = DATA_DIR / "cards_anki_export.tsv"
-    with open(export_file, "w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f, delimiter="\t")
-        writer.writerow(["Front_Puzzle", "Back_Explanation", "Thai_Script", "Thai_Phonetics", "Category", "CEFR"])
-        for r in rows:
-            front = f"<b>[{r['card_title']}]</b><br><br>🇬🇧 {r['front_challenge']}<br><br>🇹🇭 {r['thai_tones']}"
-            back = f"<b>✅ {r['back_solution']}</b><br><br>📖 {r['british_council_rule']}<br><br>💬 <i>{r['gag_quote']}</i>"
-            writer.writerow([
-                front,
-                back,
-                r['thai_script'],
-                f"{r['thai_phonetic']} ({r['thai_tones']}) - {r['thai_breakdown']}",
-                r['error_category'],
-                r['cefr_level']
-            ])
-
-    print(f"\n🎴 \033[1;32mEsportate {len(rows)} carte in formato Anki TSV!\033[0m")
-    print(f"📁 File generato: \033[1m{export_file}\033[0m")
-    print("👉 Importalo direttamente in Anki Desktop o AnkiMobile selezionando separatore Tab.\n")
+    if format_type in ("tsv", "anki"):
+        _export_tsv(output_path=tsv_path, db_path=DB_PATH)
+        print(f"\n🎴 \033[1;32mEsportate carte in formato Anki TSV!\033[0m")
+        print(f"📁 File generato: \033[1m{tsv_path}\033[0m")
+        print("👉 Importalo in Anki Desktop selezionando separatore Tab.\n")
+    elif format_type in ("apkg", "native"):
+        _export_apkg(output_path=apkg_path, db_path=DB_PATH)
+        print(f"\n📦 \033[1;32mPacchetto nativo Anki .apkg generato con successo!\033[0m")
+        print(f"📁 File generato: \033[1m{apkg_path}\033[0m")
+        print("👉 Fai doppio click sul file .apkg per caricarlo direttamente in Anki Desktop o AnkiMobile.\n")
+    else:  # all or default
+        _export_tsv(output_path=tsv_path, db_path=DB_PATH)
+        _export_apkg(output_path=apkg_path, db_path=DB_PATH)
+        print(f"\n🎴 \033[1;32mEsportazione completata con successo!\033[0m")
+        print(f"  • \033[1mAnki TSV:\033[0m   {tsv_path}")
+        print(f"  • \033[1mNativo APKG:\033[0m  {apkg_path}")
+        print("👉 Fai doppio click su .apkg per caricarlo direttamente in Anki Desktop o AnkiMobile.\n")
 
 
 def run_doctor():
@@ -2415,7 +2382,8 @@ def main():
         return
 
     if len(sys.argv) > 1 and sys.argv[1] in ("export", "--export"):
-        export_cards()
+        fmt = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] in ("tsv", "anki", "apkg", "native", "all") else "all"
+        export_cards(fmt)
         return
 
 

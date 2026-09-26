@@ -1,0 +1,20 @@
+# Prometheus Scrape Configuration for Linguo Server Telemetry & Health
+# Place inside /etc/prometheus/prometheus.yml under scrape_configs:
+
+scrape_configs:
+  - job_name: 'linguo_server'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    scheme: 'http'
+    authorization:
+      type: Bearer
+      credentials: 'linguo-secret-key-2026-linguo-coach'
+    static_configs:
+      - targets:
+          - '10.0.0.2:8765'   # WireGuard Dell IP (direct VPN)
+          - '127.0.0.1:8765'  # Localhost loopback
+        labels:
+          environment: 'production'
+          node: 'dell-precision-7670'
+          service: 'linguo-core-server'

@@ -1,0 +1,25 @@
+# Cloudflare Tunnel Ingress Configuration for Linguo Server (Dell Precision 7670)
+# Route: https://linguo.princyx.xyz -> http://localhost:8765
+
+tunnel: 7670-linguo-tunnel
+credentials-file: /etc/cloudflared/7670-linguo-tunnel.json
+
+ingress:
+  # Public Ingress for Linguo API Server (FastAPI / Uvicorn)
+  - hostname: linguo.princyx.xyz
+    service: http://localhost:8765
+    originRequest:
+      connectTimeout: 5s
+      noTLSVerify: false
+      httpHostHeader: linguo.princyx.xyz
+      keepAliveConnections: 100
+      keepAliveTimeout: 90s
+
+  # Fallback rule (mandatory for cloudflared)
+  - service: http_status:404
+
+# Diagnostic & Metrics Exporter
+metrics: localhost:2000
+logfile: /var/log/cloudflared/linguo.log
+loglevel: info
+transport-loglevel: warn

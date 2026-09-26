@@ -34,10 +34,12 @@ flowchart LR
 ## Core Specifications
 
 * **Cued-Recall Testing**: Single targeted blank `[  ?  ]` to enforce active retrieval over passive recognition.
+* **Starter Deck (Cold-Start Free)**: 15 canonical CEFR A1–B2 cards pre-loaded on install across high-frequency error categories (articles, aspect, prepositions, conditionals).
 * **Contrastive Scaffolding**: Direct transfer mapping for L1 Thai (zero-article interference, unmarked aspect, verb complementation).
+* **Dual Deck Export**: Native `.apkg` packages with 16-bit arcade CSS styling and TSV tables for Anki, AnkiMobile, and Quizlet.
 * **Calibrated Acoustic Speed**: 140 wpm ($175\text{ wpm} \times 0.80$) for perceptual phonemic discrimination.
 * **Mastery Lifecycle**: Items graduate to Mastered after 3 consecutive clean usages; recidivism automatically reactivates the card.
-* **Enterprise Telemetry**: OpenMetrics endpoint (`GET /metrics`), W3C distributed tracing (`X-Trace-Id`), and NDJSON structured logging.
+* **Enterprise Telemetry**: OpenMetrics endpoint (`GET /metrics`), W3C distributed tracing (`X-Trace-Id`), systemd service unit, Cloudflare ingress, and NDJSON structured logging.
 
 ---
 
@@ -48,14 +50,15 @@ flowchart LR
 git clone https://github.com/gptprojectmanager/linguo.git
 cd linguo && ./install.sh
 
-# 2. Run diagnostics and test suite (11/11 phases passing)
+# 2. Run diagnostics and unified test suite (11/11 phases passing)
 ./tests/test_all.sh
 
 # 3. Assess a phrase
 linguo "I go to market yesterday"
 
-# 4. Export active deck to Anki TSV
-linguo --export
+# 4. Export active deck (Native Anki .apkg + TSV)
+linguo export            # Generates cards_anki_export.apkg & cards_anki_export.tsv
+linguo export apkg       # Native Anki package with 16-bit arcade styling
 ```
 
 ---
