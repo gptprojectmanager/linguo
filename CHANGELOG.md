@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-09-26
+
+### 🌐 Remote Backend & In-App Practice
+- **Remote Coach API on Dell 7670 (`scripts/linguo_server.py`)**:
+  - FastAPI server with Bearer token authentication, running as a systemd service (`linguo-server.service`).
+  - Pre-configured agent `linguo-fast` with zero tools (`tools: []`) and minimal token consumption on `gemini-3.6-flash-low` with low effort.
+- **Dual Remote/Local Dispatch in `dash-gui`**:
+  - Automatically queries remote backend via curl if `remote_url` is configured or `LINGUO_REMOTE_URL` is set, with graceful fallback to local CLI.
+  - Automatically initializes local SQLite schema (`history`, `cards`) on virgin Macs.
+  - Speaks corrected English via `Samantha` and beginner Thai via `Kanya` without needing Python or external libraries.
+- **In-App Practice & Live Coach Bar**:
+  - Interactive input field and `⚡ Coach Me` button in the Metal HUD header.
+
+---
+
 ## [0.3.0] - 2026-09-26
 
 ### 🚀 Highlights

@@ -1,9 +1,35 @@
 use eframe::egui::{self, Color32, FontFamily, RichText, Stroke, Vec2};
 use rusqlite::{params, Connection};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+struct RemoteCoachResponse {
+    status: String,
+    timing_ms: f64,
+    analysis: RemoteAnalysis,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+struct RemoteAnalysis {
+    transcribed_english: String,
+    is_correct: bool,
+    error_category: Option<String>,
+    english_level: Option<String>,
+    corrected_english: String,
+    grammar_tip: String,
+    english_better_alternative: Option<String>,
+    pronunciation_tip: Option<String>,
+    thai_concise_script: Option<String>,
+    thai_phonetic_western: Option<String>,
+    thai_breakdown: Option<String>,
+    thai_grammar_tip: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct LinguoCard {
@@ -197,27 +223,90 @@ impl LinguoGuiApp {
         self.is_coaching = true;
         self.set_status(format!("⚡ Linguo Coach sta analizzando: \"{}\"...", phrase));
         let tx = self.tx.clone();
+        let db_path = self.db_path.clone();
+
         std::thread::spawn(move || {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let bin_path = PathBuf::from(&home).join(".local/bin/linguo");
-            let cmd = if bin_path.exists() {
-                bin_path.to_string_lossy().to_string()
-            } else {
-                "linguo".to_string()
-            };
-            let res = Command::new(cmd).arg(&phrase).output();
-            match res {
-                Ok(output) => {
-                    if output.status.success() {
-                        let _ = tx.send((true, format!("✅ Analisi completata per: \"{}\"", phrase)));
-                    } else {
-                        let err = String::from_utf8_lossy(&output.stderr);
-                        let first_line = err.lines().next().unwrap_or("Errore");
-                        let _ = tx.send((false, format!("⚠️ Errore Coach: {}", first_line)));
+            let remote_cfg = get_remote_coach_config();
+            if let Some((url, token)) = remote_cfg {
+                // 1. REMOTE COACH MODE (Via Dell 7670 / Cloudflare Tunnel)
+                let endpoint = format!("{}/coach", url.trim_end_matches('/'));
+                let payload = serde_json::json!({
+                    "phrase": phrase,
+                    "mode": "fast"
+                }).to_string();
+
+                let res = Command::new("curl")
+                    .args([
+                        "-s",
+                        "-X", "POST",
+                        &endpoint,
+                        "-H", "Content-Type: application/json",
+                        "-H", &format!("Authorization: Bearer {}", token),
+                        "-d", &payload,
+                        "--max-time", "35",
+                    ])
+                    .output();
+
+                match res {
+                    Ok(output) => {
+                        let out_str = String::from_utf8_lossy(&output.stdout);
+                        match serde_json::from_str::<RemoteCoachResponse>(&out_str) {
+                            Ok(resp) => {
+                                let ana = resp.analysis;
+                                let _ = save_remote_analysis_to_db(&db_path, &phrase, &ana);
+
+                                // Play English speech via macOS say
+                                let eng_clean = ana.corrected_english.replace('\'', "");
+                                let _ = Command::new("say")
+                                    .args(["-v", "Samantha", "-r", "165", &eng_clean])
+                                    .spawn();
+
+                                // Play Thai speech via macOS say
+                                if let Some(ref thai) = ana.thai_concise_script {
+                                    let thai_clean = thai.clone();
+                                    std::thread::spawn(move || {
+                                        std::thread::sleep(Duration::from_millis(600));
+                                        let _ = Command::new("say")
+                                            .args(["-v", "Kanya", "-r", "150", &thai_clean])
+                                            .status();
+                                    });
+                                }
+
+                                let timing_sec = resp.timing_ms / 1000.0;
+                                let _ = tx.send((true, format!("✅ Analizzato via Dell 7670 ({:.1}s): \"{}\"", timing_sec, phrase)));
+                            }
+                            Err(e) => {
+                                let _ = tx.send((false, format!("⚠️ Risposta server: {} ({})", out_str.lines().next().unwrap_or(""), e)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send((false, format!("⚠️ Connessione remota fallita: {}", e)));
                     }
                 }
-                Err(e) => {
-                    let _ = tx.send((false, format!("⚠️ Impossibile avviare il coach: {}", e)));
+            } else {
+                // 2. LOCAL CLI COACH MODE (Mac locale con Python e binario linguo)
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let bin_path = PathBuf::from(&home).join(".local/bin/linguo");
+                let cmd = if bin_path.exists() {
+                    bin_path.to_string_lossy().to_string()
+                } else {
+                    "linguo".to_string()
+                };
+                let res = Command::new(cmd).arg(&phrase).output();
+                match res {
+                    Ok(output) => {
+                        if output.status.success() {
+                            let _ = tx.send((true, format!("✅ Analisi locale completata: \"{}\"", phrase)));
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            let first_line = err.lines().next().unwrap_or("Errore");
+                            let _ = tx.send((false, format!("⚠️ Errore Coach: {}", first_line)));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send((false, format!("⚠️ Impossibile avviare il coach: {}", e)));
+                    }
                 }
             }
         });
@@ -614,6 +703,142 @@ fn set_card_mastered_in_db(db_path: &Path, card_id: i64, mastered: bool) -> Resu
         "UPDATE cards SET is_mastered = ?1 WHERE id = ?2",
         params![if mastered { 1 } else { 0 }, card_id],
     )?;
+    Ok(())
+}
+
+fn get_remote_coach_config() -> Option<(String, String)> {
+    if let Ok(url) = std::env::var("LINGUO_REMOTE_URL") {
+        if !url.trim().is_empty() {
+            let token = std::env::var("LINGUO_API_TOKEN")
+                .unwrap_or_else(|_| "linguo-secret-key-2026-linguo-coach".to_string());
+            return Some((url.trim().to_string(), token));
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let cfg_path = PathBuf::from(home).join(".local/share/linguo/config.json");
+    if let Ok(content) = std::fs::read_to_string(cfg_path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(url) = val.get("remote_url").and_then(|u| u.as_str()) {
+                if !url.trim().is_empty() {
+                    let token = val.get("auth_token").and_then(|t| t.as_str())
+                        .unwrap_or("linguo-secret-key-2026-linguo-coach");
+                    return Some((url.trim().to_string(), token.to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn save_remote_analysis_to_db(db_path: &Path, original_phrase: &str, ana: &RemoteAnalysis) -> Result<(), rusqlite::Error> {
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("
+        PRAGMA journal_mode=WAL;
+        CREATE TABLE IF NOT EXISTS history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            original_text TEXT NOT NULL,
+            is_correct INTEGER NOT NULL,
+            corrected_english TEXT NOT NULL,
+            grammar_tip TEXT,
+            thai_script TEXT NOT NULL,
+            thai_phonetic TEXT NOT NULL,
+            thai_breakdown TEXT,
+            audio_thai_path TEXT,
+            audio_eng_path TEXT,
+            english_level TEXT,
+            english_better_alternative TEXT,
+            pronunciation_tip TEXT,
+            thai_grammar_tip TEXT,
+            is_starred INTEGER DEFAULT 0,
+            error_category TEXT
+        );
+        CREATE TABLE IF NOT EXISTS cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            error_category TEXT NOT NULL,
+            sprite_name TEXT NOT NULL,
+            card_title TEXT NOT NULL,
+            cefr_level TEXT DEFAULT 'B1',
+            card_type TEXT NOT NULL,
+            front_challenge TEXT NOT NULL,
+            back_solution TEXT NOT NULL,
+            british_council_rule TEXT NOT NULL,
+            gag_quote TEXT,
+            thai_script TEXT NOT NULL,
+            thai_phonetic TEXT NOT NULL,
+            thai_tones TEXT NOT NULL,
+            thai_breakdown TEXT,
+            source_history_ids TEXT,
+            is_mastered INTEGER DEFAULT 0
+        );
+    ")?;
+
+    let cat = ana.error_category.clone().unwrap_or_else(|| "NONE".to_string());
+    conn.execute(
+        "INSERT INTO history (
+            original_text, is_correct, corrected_english, grammar_tip,
+            thai_script, thai_phonetic, thai_breakdown,
+            english_level, english_better_alternative, pronunciation_tip, thai_grammar_tip,
+            is_starred, error_category
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12)",
+        params![
+            original_phrase,
+            if ana.is_correct { 1 } else { 0 },
+            ana.corrected_english,
+            ana.grammar_tip,
+            ana.thai_concise_script.as_deref().unwrap_or(""),
+            ana.thai_phonetic_western.as_deref().unwrap_or(""),
+            ana.thai_breakdown.as_deref().unwrap_or(""),
+            ana.english_level.as_deref().unwrap_or("B1"),
+            ana.english_better_alternative.as_deref().unwrap_or(""),
+            ana.pronunciation_tip.as_deref().unwrap_or(""),
+            ana.thai_grammar_tip.as_deref().unwrap_or(""),
+            cat
+        ],
+    )?;
+    let history_id = conn.last_insert_rowid();
+
+    // If incorrect, add MTG card if not already active
+    if !ana.is_correct && cat != "NONE" && !cat.is_empty() {
+        let mut check_stmt = conn.prepare("SELECT id FROM cards WHERE error_category = ?1 AND is_mastered = 0")?;
+        let exists = check_stmt.exists(params![cat])?;
+        if !exists {
+            let card_title = format!("THE {} RULE", cat.replace('_', " "));
+            let front_puzzle = format!("Avoid saying: \"{}\" -> Complete correctly:", original_phrase);
+            let sprite = match cat.as_str() {
+                "ARTICLES" => "market_stamp",
+                "PREPOSITIONS" => "to_toll",
+                "VERB_PATTERNS" => "gerund_vest",
+                _ => "arcade_badge",
+            };
+            conn.execute(
+                "INSERT INTO cards (
+                    error_category, sprite_name, card_title, cefr_level, card_type,
+                    front_challenge, back_solution, british_council_rule, gag_quote,
+                    thai_script, thai_phonetic, thai_tones, thai_breakdown,
+                    source_history_ids, is_mastered
+                ) VALUES (?1, ?2, ?3, ?4, 'Challenge Puzzle', ?5, ?6, ?7, ?8, ?9, ?10, 'Mid / Falling', ?11, ?12, 0)",
+                params![
+                    cat,
+                    sprite,
+                    card_title,
+                    ana.english_level.as_deref().unwrap_or("B1"),
+                    front_puzzle,
+                    ana.corrected_english,
+                    ana.grammar_tip,
+                    "Remember: master this pattern to unlock the next level!",
+                    ana.thai_concise_script.as_deref().unwrap_or(""),
+                    ana.thai_phonetic_western.as_deref().unwrap_or(""),
+                    ana.thai_breakdown.as_deref().unwrap_or(""),
+                    history_id.to_string()
+                ],
+            )?;
+        }
+    }
     Ok(())
 }
 
