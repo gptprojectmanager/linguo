@@ -34,15 +34,28 @@ fi
 # 5. Dependencies via uv
 if command -v uv >/dev/null 2>&1; then
     echo "📦 Checking Python packages with uv..."
-    uv pip install torch 'numpy<2' soundfile kokoro edge-tts
+    uv pip install pydantic torch 'numpy<2' soundfile kokoro edge-tts
 else
     echo "⚠️ uv not found in PATH. Please install uv (https://github.com/astral-sh/uv)"
 fi
 
+# 6. Rust Immediate-Mode GUI (dash-gui)
+export PATH="$HOME/.cargo/bin:$PATH"
+if command -v cargo >/dev/null 2>&1; then
+    echo "🦀 Rust toolchain detected. Compiling dash-gui HUD..."
+    "$SCRIPT_DIR/install_gui.sh"
+else
+    echo "ℹ️ Cargo not found. To build the native Rust HUD, install Rust (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh) and run ./install_gui.sh"
+fi
+
 echo ""
-echo "🎉 Linguo is installed! Use:"
-echo "   linguo 'your phrase'       # Analyze & synthesize"
-echo "   linguo replay (or lr)      # Replay last"
-echo "   linguo loop 3 (or ll)      # Loop 3x"
-echo "   linguo board  (or lb)      # Open ADHD Flashcard TUI Board"
-echo "   linguo star <id>           # Star / Favorite entry"
+echo "🎉 Linguo is installed! Available commands:"
+echo "   linguo 'your phrase'       # Instant Cambridge analysis & dual audio"
+echo "   linguo --gui (or linguo-gui) # Native 16-bit MTG HUD (Metal / 60fps)"
+echo "   linguo --audit             # British Council gap audit & MTG card minting"
+echo "   linguo --cards             # Review active MTG recall puzzle cards"
+echo "   linguo --board (or lb)     # Open ADHD Flashcard TUI Board (curses)"
+echo "   linguo --export            # Export Anki-compatible TSV deck"
+echo "   linguo --preseed           # Cache 75 survival Thai audio bricks"
+echo "   linguo --doctor            # Verify all engines and system permissions"
+

@@ -1,29 +1,29 @@
 # 🧠 Linguo
 
-> **Dual English-Thai Voice & Language Coach for Terminal Power Users**  
-> *Designed for fast language acquisition, ADHD-friendly active recall, and zero-latency workflow.*
+> **Dual English-Thai Voice & Language Coach with 16-bit MTG Arcade HUD**  
+> *Designed for high-focus language acquisition, ADHD-friendly active recall, and zero-latency workflow.*
 
 ---
 
 ## ⚡ Highlights
 
-- **Instantaneous Workflow (<0.5s)**: Fast dictation / text analysis, clipboard copy, and auto-paste (`Cmd+V`) into active apps without blocking.
-- **Calm Single-Core Background Audio**: Audio synthesis runs asynchronously in a detached child worker (`nice -n 15`, `torch.set_num_threads(1)`), keeping CPU cool and terminal fluid.
-- **Hybrid Neural Speech Engines**:
-  - 🇬🇧 **English (100% Local & Offline)**: Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (24kHz neural voice `af_heart`).
-  - 🇹🇭 **Thai**: High-fidelity 48kHz studio audio via **Edge-TTS** (`th-TH-PremwadeeNeural` / `th-TH-NiwatNeural`), with automatic fallback to macOS `Kanya`.
+- **Instantaneous Dictation & Coach (<0.5s)**: Fast speech analysis, clipboard copy, and auto-paste (`Cmd+V`) into active apps without blocking.
+- **16-bit MTG Trading Card Engine**: Clusters recurring speech gaps into collectible Magic: The Gathering-style puzzle cards (Active Recall Challenge on the front, Cambridge solution + British Council rule + arcade gag on the back).
+- **Native Rust Metal 60fps HUD (`dash-gui`)**:
+  - Pure Rust immediate-mode desktop window (`eframe` / `wgpu`).
+  - True 16-bit arcade aesthetics with TrueType Ayuthaya Thai font support (`/System/Library/Fonts/Supplemental/Ayuthaya.ttf`).
+  - Always-on-Top pinning mode (`[P]`), 0% CPU at idle, ~15 MB RAM footprint.
+- **ADHD Spaced Repetition & Algorithmic Auto-Mastery**:
+  - Automatically archives cards (`is_mastered = 1`) after a streak of 3 consecutive clean usages in subsequent real speech.
+  - **Recidivism Detection**: Automatically reactivates mastered cards if errors re-occur weeks later.
+- **Calm Single-Core Background Audio**:
+  - 🇬🇧 **English (100% Local & Offline)**: Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (24kHz neural voice `af_nicole` @ 0.8x didactic pace).
+  - 🇹🇭 **Thai Studio Pipeline**: Edge-TTS studio quality (`th-TH-PremwadeeNeural` @ 0.8x) backed by a 75-brick local offline cache and native macOS `say -v Kanya` fallback.
+- **Pydantic v2 Rust-Core Schema Validation**:
+  - Sub-millisecond schema parsing with fuzzy auto-healing of categories.
 - **ADHD Active Recall & Flashcard TUI (`lb`)**:
-  - Curses-based split-view board inside iTerm2.
-  - Interactive Flashcard Study Mode (`[f]`) with hidden answers to test active recall before listening.
-  - Star / Favorites system (`[s]`) with instant filter toggle (`[Tab]`).
-- **Comprehensive Didactic Analysis**:
-  - **CEFR Level**: Instant rating (`A1`–`C1`).
-  - **Grammar Feedback**: Concise, actionable English grammar explanations.
-  - **🚀 Level-Up Alternative**: Advanced B2/C1 phrasing suggestions to level up vocabulary.
-  - **🗣️ Phonetics & Pronunciation**: Target tips on word stress, silent letters, and pitfalls for Italian speakers.
-  - **🇹🇭 Beginner Thai (2–4 words)**: Ultra-simplified core vocabulary with Paiboon tone marks.
-  - **💡 Thai Grammar**: Beginner rules (Subject-Verb-Object, no verb conjugation/tenses, particles, adjectives as verbs).
-- **Persistent Memory**: Structured storage in SQLite (`history.db`) and human-readable Markdown (`history.md`).
+  - Curses-based split-view board inside any terminal.
+- **Anki Mobile Integration**: One-click TSV deck export with HTML formatting for Anki Desktop and AnkiMobile (`linguo --export`).
 
 ---
 
@@ -35,18 +35,22 @@
             ▼
  ⚡ Antigravity Engine (Flash 3.6 / Gemini)
             │
-            ├────────────────────────────────────────┐
-            ▼                                        ▼
- 📋 Auto-Paste & Terminal Card (<0.5s)    🚀 Detached Worker (nice -n 15, 1 core)
- ├── Instant pbcopy & Cmd+V                          │
- ├── CEFR Level Badge [A2-C1]                        ├─► 🇬🇧 Kokoro-82M (Local Offline)
- ├── Grammar Tip & Level-Up                          │    └── eng_<id>.mp3 (24kHz)
- └── Thai Concept & Breakdown                        │
-                                                     └─► 🇹🇭 Edge-TTS / Kanya (Studio)
-                                                          └── thai_<id>.mp3 (48kHz)
-                                                                     │
-                                                                     ▼
-                                                          🎧 Replay & Loop ('lr', 'll', 'lb')
+            ├────────────────────────────────────────┬────────────────────────────────────────┐
+            ▼                                        ▼                                        ▼
+ 📋 Auto-Paste (<0.5s)                     🗃️ SQLite WAL (history.db)               🚀 Background Audio Worker
+ ├── Instant pbcopy & Cmd+V                ├── history table                        │   (nice -n 15, 1 core)
+ ├── CEFR Level Badge [A1-C1]              ├── cards table (MTG deck)               ├─► 🇬🇧 Kokoro-82M (0.8x)
+ ├── Grammar Tip & Level-Up                └── card_archetypes table                │    └── eng_<id>.mp3
+ └── Pydantic v2 Rust Schema                                                        └─► 🇹🇭 Edge-TTS / Cache (0.8x)
+                                                                                         └── thai_<id>.mp3
+                                                     │
+                             ┌───────────────────────┴───────────────────────┐
+                             ▼                                               ▼
+               🕹️ Native Rust HUD (dash-gui)                   🧠 ADHD Curses TUI (lb)
+               ├── 16-bit MTG Challenge & Flip                 ├── Split-view history
+               ├── Metal GPU Accelerated (60fps)               ├── Flashcard mode [f]
+               ├── Always-on-Top Pinning [P]                   └── Audio loop 3x [l]
+               └── Local Thai & English Replay
 ```
 
 ---
@@ -54,12 +58,12 @@
 ## 📦 Installation
 
 ### Prerequisites
-- macOS (tested on Monterey and later, Intel & Apple Silicon)
+- macOS (Monterey or later, Intel & Apple Silicon)
 - `ffmpeg` (e.g. via MacPorts or Homebrew)
 - [uv](https://github.com/astral-sh/uv) (fast Python package manager)
-- [Antigravity CLI](https://antigravity.google) (`agy`)
+- [Rust](https://rustup.rs) (for compiling the native Metal HUD)
 
-### Quick Setup
+### One-Line Setup
 
 ```bash
 git clone https://github.com/gptprojectmanager/linguo.git
@@ -67,82 +71,100 @@ cd linguo
 ./install.sh
 ```
 
-### Python Dependencies (via `uv`)
-
-```bash
-uv pip install torch 'numpy<2' soundfile kokoro edge-tts
-```
+`install.sh` automatically configures directories, copies binaries, synchronizes agent prompts, installs Python dependencies via `uv`, and compiles the native Rust HUD `dash-gui` with codesigning.
 
 ---
 
-## ⌨️ Terminal Usage & Aliases
+## 🕹️ Native Rust 16-bit MTG HUD (`dash-gui`)
 
-Add these to your `~/.zshrc`:
+Launch the floating HUD:
 
 ```bash
-alias lb="linguo board"   # Open ADHD Flashcard TUI Board
-alias lr="linguo replay"  # Replay pronunciation of last entry
+linguo-gui
+# or via CLI:
+linguo --gui
+```
+
+### HUD Controls & Keybindings
+
+| Key | Action | Description |
+| :--- | :--- | :--- |
+| `Space` | **Flip Card** | Toggle between Front (Challenge) and Back (Solution + Gag) |
+| `P` | **Pin Window** | Toggle Always-on-Top floating mode |
+| `A` / `←` | **Previous Card** | Navigate to previous card in deck |
+| `D` / `→` | **Next Card** | Navigate to next card in deck |
+| `E` | **Play English** | Listen to British Council solution (Kokoro `af_nicole` 0.8x) |
+| `T` / `R` | **Play Thai** | Listen to Thai survival brick (Edge-TTS `Premwadee` 0.8x) |
+| `M` | **Master Card** | Toggle card as mastered / archived |
+| `F5` | **Reload Deck** | Reload cards from SQLite database |
+
+---
+
+## ⌨️ CLI Commands & Aliases
+
+Add these aliases to your `~/.zshrc`:
+
+```bash
+alias lg="linguo --gui"   # Launch native 16-bit MTG HUD
+alias lb="linguo board"   # Open ADHD Flashcard CUI/TUI Board
+alias lr="linguo replay"  # Replay audio pronunciation of last entry
 alias ll="linguo loop"    # Loop pronunciation 3x for memorization
-alias lp="linguo popup"   # Toggle recording (start / stop & paste)
 alias lv="linguo -v"      # Record from microphone directly
 ```
 
-### CLI Commands
+### Full CLI Command Reference
 
 ```bash
-# Analyze and synthesize phrase
+# 1. Analyze and synthesize phrase
 linguo "I am going to market tomorrow morning"
 
-# Replay last audio
-linguo replay
-lr
+# 2. British Council Gap Audit & MTG Card Minting
+linguo --audit
 
-# Replay specific entry by ID
-linguo replay 23
-lr 23
+# 3. View active MTG cards in terminal
+linguo --cards
+linguo --flip 1           # Reveal card solution & British Council rule
+linguo --master 1         # Mark card as mastered
 
-# Loop playback 3 times
-linguo loop 3
-ll
+# 4. Launch Native Rust GUI HUD
+linguo --gui              # or: linguo-gui
 
-# Toggle Star / Favorite
-linguo star 24
+# 5. Launch Terminal Curses TUI Board
+linguo --board            # or: lb
 
-# Launch interactive board
-linguo board
-lb
+# 6. Replay & Loop Audio
+linguo replay             # or: lr
+linguo replay 5           # replay specific entry #5
+linguo loop 3             # or: ll (3-repetition cycle)
 
-# Configure TTS engine
-linguo tts hybrid  # Kokoro English + Edge Thai (Default)
-linguo tts kokoro  # 100% Offline English Kokoro + Say Thai
-linguo tts edge    # Edge-TTS for both
-linguo tts local   # macOS 'say' (Samantha & Kanya)
+# 7. System Diagnostics & Permission Check
+linguo --doctor
+
+# 8. Pre-cache 75 Thai Survival Audio Bricks (100% Offline)
+linguo --preseed
+
+# 9. Export Deck to Anki TSV
+linguo --export
 ```
 
 ---
 
-## 🧠 ADHD Interactive Board (`lb`)
+## 🧪 Automated Test Suite
 
-Launch the board in any iTerm2 tab:
+Run the full end-to-end test suite:
 
 ```bash
-lb
+./tests/test_all.sh
 ```
 
-### Keybindings
-
-| Key | Action |
-| :--- | :--- |
-| `↑` / `↓` or `k` / `j` | Navigate entries |
-| `Space` | Play audio / Reveal answer in Flashcard mode |
-| `f` | **Toggle Flashcard Mode** (Active Recall challenge) |
-| `s` | **Toggle Star (`★`)** on current item |
-| `Tab` | **Toggle Filter**: All Items vs. `★ Starred Only` |
-| `l` | **Loop 3x**: Plays English ➔ Thai in a 3-repetition cycle |
-| `e` | Play English audio only |
-| `t` | Play Thai audio only |
-| `r` | Refresh entries from database |
-| `q` / `ESC` | Exit board |
+Verifies:
+- Python syntax compilation
+- Pydantic v2 schema validator and auto-healing
+- SQLite WAL mode and database tables (`history`, `cards`, `card_archetypes`)
+- System diagnostics (`linguo --doctor`)
+- British Council audit engine
+- Anki TSV export generator
+- Native Rust `dash-gui` Metal executable
 
 ---
 
@@ -159,7 +181,6 @@ Configuration is located at `~/.local/share/linguo/config.json`:
   "eng_voice": "af_nicole",
   "thai_voice": "th-TH-PremwadeeNeural",
   "speed": 0.8,
-  "edge_eng_voice": "en-US-JennyNeural",
   "say_eng_voice": "Samantha",
   "say_thai_voice": "Kanya",
   "notifications": true,
@@ -171,4 +192,4 @@ Configuration is located at `~/.local/share/linguo/config.json`:
 
 ## 📄 License
 
-MIT License. Designed with care for high-focus language acquisition.
+MIT License. Crafted with care for zero-friction language mastery.
