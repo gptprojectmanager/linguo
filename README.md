@@ -1,449 +1,297 @@
-# Linguo: Dual English-Thai Language Acquisition Engine
+# Linguo: Intelligent Computer-Assisted Language Learning (CALL) System
 
-> Technical specification, system topology, and component architecture for the Linguo dual-coach ecosystem.
+> **A Pedagogical & Architectural Specification for British Council Examiners, Applied Linguists, and Academic Evaluators**  
+> *Dual English-Thai Formative Assessment, Contrastive Linguistics, and Active Recall Cognitive Architecture*
 
 ---
 
-## 1. System Topology & Global Architecture
+## 1. Executive Summary & Pedagogical Value Proposition
 
-Linguo is an asynchronous, dual-coach pedagogical system designed for real-time speech correction, active recall flashcard generation, and bilingual audio synthesis. The infrastructure spans macOS clients and an optional high-performance Linux remote backend (Dell Precision 7670), communicating over private VPN, Cloudflare Anycast tunnel, or local fallback.
+Traditional language learning software and contemporary generative AI assistants suffer from two complementary pedagogical flaws:
+1. **Passive Correction without Metacognition**: Standard generative AI rewrites learner sentences automatically. While the output is polished, the learner remains passive, fostering reliance rather than internalizing syntactical schemas.
+2. **Gamification without Syntactic Depth**: Mobile flashcard platforms frequently emphasize lexical rote memorization over systemic grammatical competence, ignoring cross-linguistic transfer traps and phonetic stress.
+
+**Linguo** is an autonomous, real-time Computer-Assisted Language Learning (CALL) platform built upon foundational principles of **Second Language Acquisition (SLA)**:
+
+* **Immediate Formative Feedback (<0.5s)**: In accordance with Long’s *Interaction Hypothesis*, communicative feedback is most effective when provided at the exact moment of communicative breakdown, before grammatical errors become fossilized.
+* **Contrastive Linguistic Diagnosis**: Directly addresses structural transfer interference between English (a synthetic/analytic Germanic-Romance language with inflections, articles, and tense-aspect morphology) and Thai (an isolating, tonal Kra-Dai language with zero conjugation, zero grammatical gender, and no indefinite/definite articles).
+* **Cognitive Active Recall & Desirable Difficulty**: Based on Bjork’s *Desirable Difficulties* framework, errors are not simply recorded; they are automatically synthesized into single-blank **Challenge Puzzles** requiring active retrieval, anchored in a 16-bit physical card interface.
+* **Acoustic Phonetic Slowing (0.8x Pedagogy)**: Articulatory clarity is prioritized over natural conversational speed. Neural speech synthesis deliberately articulates English phonemes and Thai Paiboon tones at $0.80\times$ speed ($140\text{ wpm}$) to train perceptual phonemic discrimination in non-native adult learners.
+
+---
+
+## 2. Pedagogical Architecture
+
+The following diagram illustrates how learner speech or written text transitions through formative diagnosis, institutional verification gates, cognitive flashcard minting, and acoustic synthesis.
 
 ```mermaid
 flowchart TD
-    subgraph Client["macOS Client Machine"]
-        User["User Speech / Text Input"]
-        InputLayer["Ingestion Layer<br/>(Menu Bar 🎙️ / CLI / Metal HUD)"]
-        LocalEngine["Local Engine (bin/linguo)<br/>• Python 3.12 + Pydantic v2<br/>• SQLite WAL (history.db)<br/>• Kokoro-82M (2-Core Neural TTS)"]
-        NativeHUD["Rust Metal HUD (dash-gui)<br/>• eframe / wgpu @ 60fps<br/>• TrueType Ayuthaya Thai Font"]
+    subgraph Learner["Learner Interface & Input"]
+        Input["Spoken Utterance or Written Text<br/>(e.g., 'I go to market tomorrow')"]
+        Capture["Zero-Interruption Client<br/>• Global Hotkey / Menu Bar / HUD"]
     end
 
-    subgraph Network["Network Dispatch Cascade"]
-        Tier1["Tier 1: WireGuard VPN LAN<br/>http://10.0.0.2:8765/health (1ms)"]
-        Tier2["Tier 2: Cloudflare Anycast Tunnel<br/>https://linguo.princyx.xyz/health"]
-        Tier3["Tier 3: Local Subprocess<br/>~/.local/bin/linguo (Offline)"]
+    subgraph AssessmentEngine["Formative Assessment & Quality Gates"]
+        Gate1["⚡ GATE 1: Diagnostic Examiner (<0.5s)<br/>• CEFR A1-C1 Assessment<br/>• Error Identification & Pedagogical Rule<br/>• Natural Phrasing Alternative"]
+        Gate2{"🛡️ GATE 2: Decorum & Ethics Filter<br/>(Deterministic Policy)"}
+        Gate3["🧠 GATE 3: British Council Gap Audit<br/>• Senior Examiner Verification<br/>• Paiboon 5-Tone Phonetic Audit<br/>• Grounding into Immutable Archetypes"]
     end
 
-    subgraph RemoteBackend["Remote Backend (Dell 7670 Linux)"]
-        FastAPIServer["scripts/linguo_server.py<br/>• FastAPI + Uvicorn (Port 8765)<br/>• systemd: linguo-server.service<br/>• Bearer Token Authentication"]
-        RemoteLLM["Antigravity CLI (AGY)<br/>• Gate 1: gemini-3.6-flash-low (Fast Coach)<br/>• Gate 3: gemini-3.8-flash-high (Audit Engine)"]
+    subgraph CognitiveRetention["Cognitive Retention & Spaced Repetition"]
+        SafeOutcome["Educational Correction Provided<br/>(Card minting suppressed for sensitive topics)"]
+        Deck["🎴 Active Recall Deck (16-bit MTG HUD)<br/>• Single [ ? ] Cognitive Target<br/>• Auto-Mastery (3 clean streak usages)<br/>• Recidivism Reactivation"]
+        Anki["Anki TSV Spaced Repetition Export"]
     end
 
-    User --> InputLayer
-    InputLayer --> NativeHUD
-    InputLayer --> LocalEngine
-    NativeHUD --> Tier1
-    Tier1 -- "Fail / Timeout" --> Tier2
-    Tier2 -- "Fail / Timeout" --> Tier3
-    Tier1 -- "Success" --> FastAPIServer
-    Tier2 -- "Success" --> FastAPIServer
-    FastAPIServer --> RemoteLLM
-    Tier3 --> LocalEngine
+    subgraph AcousticDelivery["Acoustic Discrimination"]
+        TTS["Didactic Speech Synthesis (0.8x Speed)<br/>• 🇬🇧 English: Neural 24kHz / Kokoro-82M<br/>• 🇹🇭 Thai: Edge Neural / Paiboon Tones"]
+    end
+
+    Input --> Capture --> Gate1 --> Gate2
+    Gate2 -- "Sensitive / NSFW" --> SafeOutcome
+    Gate2 -- "Educational Content" --> Deck
+    Deck --> Gate3
+    Deck --> Anki
+    Deck --> TTS
 ```
 
 ---
 
-## 2. Ingestion & Input Pipeline
+## 3. The 3-Tier Pedagogical Quality Gate
 
-The client accepts audio from the hardware microphone or raw text from keyboard interfaces, immediately dispatching analysis without blocking active applications.
-
-```mermaid
-flowchart LR
-    subgraph AudioCapture["Audio Ingestion"]
-        Mic["Microphone :0"] --> FFmpeg["ffmpeg (AVFoundation)<br/>• Orphaned process (launchd PID 1)<br/>• 22.05 kHz, 1 Channel<br/>• Lock: /tmp/linguo_busy.lock"]
-        FFmpeg --> TempAudio["/tmp/linguo_mic.mp3"]
-    end
-
-    subgraph Triggers["Trigger Mechanisms"]
-        MenuBar["macOS Menu Bar Item 🎙️<br/>(PyObjC Cocoa / com.linguo.bar.plist)"]
-        CLI["CLI: linguo 'phrase'<br/>or linguo -v"]
-        GUIBar["dash-gui In-App Coach Bar<br/>(Text input + Enter)"]
-    end
-
-    subgraph ImmediateAction["Zero-Latency Dispatch (<0.5s)"]
-        TempAudio --> AudioProcessor["process_audio_file()"]
-        CLI --> TextProcessor["process_text()"]
-        GUIBar --> TextProcessor
-        TextProcessor --> Pbcopy["pbcopy (System Clipboard)"]
-        Pbcopy --> CmdV["AppleScript (Cmd+V Auto-Paste)"]
-    end
-```
-
-### Component Details
-* **Entry Script**: [`bin/linguo`](file:///Users/sam/linguo/bin/linguo)
-* **Audio Capture Engine**: Native `ffmpeg` via macOS AVFoundation device `:0` spawned detached via two-stage `os.fork()` reparented to `launchd` (PID 1).
-* **Auto-Paste Driver**: `osascript -e 'tell application "System Events" to keystroke "v" using command down'`.
-* **Locking Mechanism**: `/tmp/linguo_busy.lock` prevents overlapping recordings.
-
----
-
-## 3. Network & Dual Dispatch Cascade (Smart 3-Tier Probe)
-
-When running the native client ([`dash-gui`](file:///Users/sam/linguo/gui/dash-gui/src/main.rs)), request dispatch probes an automatic 3-tier cascade to guarantee uninterrupted service whether the user is on the private LAN, abroad, or offline.
+To preserve institutional integrity and eliminate model hallucinations or stylistic degradation, Linguo routes every student interaction through **three distinct evaluation tiers**:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant GUI as Native Metal HUD (dash-gui)
-    participant Tier1 as Tier 1 (WireGuard 10.0.0.2:8765)
-    participant Tier2 as Tier 2 (Tunnel linguo.princyx.xyz)
-    participant Tier3 as Tier 3 (Local Subprocess)
-    participant Dell as Dell 7670 Backend
+    actor Student as Language Learner
+    participant Gate1 as Gate 1: Diagnostic Assessment
+    participant Gate2 as Gate 2: Content Decorum
+    participant Gate3 as Gate 3: Senior Examiner Audit
+    participant Ledger as SQLite Memory Ledger
 
-    GUI->>Tier1: GET /health (timeout: 1000ms)
-    alt Tier 1 Available (LAN / WireGuard VPN)
-        Tier1-->>GUI: 200 OK
-        GUI->>Dell: POST /coach (Bearer Token)
-        Dell-->>GUI: Analysis JSON + timing_ms
-    else Tier 1 Timeout / Unreachable
-        GUI->>Tier2: GET /health (timeout: 2000ms)
-        alt Tier 2 Available (Public Cloudflare Anycast)
-            Tier2-->>GUI: 200 OK
-            GUI->>Dell: POST /coach (via Cloudflare Anycast)
-            Dell-->>GUI: Analysis JSON + timing_ms
-        else Tier 2 Timeout / Offline
-            GUI->>Tier3: Exec ~/.local/bin/linguo 'phrase'
-            Tier3-->>GUI: Local stdout analysis
-        end
+    Student->>Gate1: Submits phrase ("I need discuss with team")
+    Gate1->>Gate1: Validates CEFR Level (B1) & Error Category (PREPOSITIONS)
+    Gate1-->>Gate2: Structured Pydantic Analysis
+    
+    alt Content Contains Sensitive/NSFW Topics
+        Gate2-->>Student: Grammatical correction returned immediately
+        Gate2->>Ledger: Commit with SENSITIVE_NO_CARD (Suppresses flashcard)
+    else Standard Pedagogical Gap
+        Gate2->>Ledger: Commit error to history ledger
+        Note over Ledger,Gate3: Recurring gap cluster identified (linguo --audit)
+        Gate3->>Gate3: Formulate canonical British Council rule (1 sentence)
+        Gate3->>Gate3: Generate Paiboon tones (M/L/H/F/R) & single-blank challenge
+        Gate3->>Ledger: Mint immutable Arcade Puzzle Card in active deck
+        Ledger-->>Student: Display puzzle on 16-bit MTG HUD
     end
 ```
 
-### Protocol & Security Specification
-* **Backend Implementation**: [`scripts/linguo_server.py`](file:///Users/sam/linguo/scripts/linguo_server.py) (FastAPI + Uvicorn) running on systemd service `linguo-server.service` on `sam7670`.
-* **Authentication**: HTTP Authorization Header `Bearer <LINGUO_API_TOKEN>`.
-* **Tunnel Configuration**: Cloudflare Zero Trust tunnel `home-recovery` routing public Anycast requests to `localhost:8765`.
-* **Fallback Degradation**: Pure local execution when offline.
+### Detailed Gate Responsibilities
+
+| Tier | Institutional Role | Engine & Model Profile | Pedagogical Rationale |
+| :--- | :--- | :--- | :--- |
+| **Gate 1: Fast Diagnostic Assessment** | Immediate Formative Diagnosis | `gemini-3.6-flash-low` (Effort: low, 0 tools) | Formative feedback must arrive within $<0.5\text{s}$ to prevent cognitive distraction. Computes CEFR rating, pinpoint grammar tips, and natural native alternatives. |
+| **Gate 2: Decorum & Ethics Filter** | Pedagogical Safety & Classroom Decorum | Deterministic Lexical & Semantic Scanner | If an adult learner utilizes sensitive or taboo language (violence, substances, explicit themes), the grammatical explanation is respectfully provided, but the creation of permanent gamified challenge cards is strictly blocked (`SENSITIVE_NO_CARD`). |
+| **Gate 3: Senior Examiner Gap Audit** | Rigorous Pedagogical Review | `gemini-3.8-flash-high` (Effort: high, deep reasoning) | Evaluates recurring error clusters to formulate canonical British Council grammatical explanations, verifies 5-tone Paiboon phonetic breakdowns, and slots puzzles into fixed archetypes. |
 
 ---
 
-## 4. Language Inference & 3-Tier Quality Gates
+## 4. Cognitive Architecture: Active Recall & Spaced Repetition
 
-To prevent pedagogical inaccuracies, linguistic hallucinations, and stylistic drift, input evaluation is structured into **3 progressive Quality Gates**:
+### 4.1 The Failure of Multiple Choice vs. Single-Blank Puzzles
+Cognitive science demonstrates that recognition testing (multiple choice) induces an "illusion of competence". Linguo strictly enforces **Cued Production Testing**:
+* Every generated challenge presents a single targeted blank `[  ?  ]`.
+* The learner is forced to actively retrieve the grammatical particle or tense inflection from memory before pressing the spacebar to flip the card.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ⚔️  THE 'TO' TOLL  •  B1  •  Fantasy RPG Guild               │
+├─────────────────────────────────────────────────────────────┤
+│ 🇬🇧 CHALLENGE PUZZLE:                                        │
+│     "Avoid saying: 'I need discuss with my team'             │
+│      Complete: 'I need [  ?  ] discuss with my team.'"      │
+├─────────────────────────────────────────────────────────────┤
+│ 🇹🇭 THAI CONTRASTIVE GROUNDING:                              │
+│     ต้องคุย (dtɔ̂ng khui)  [ F / M ]                           │
+│     ต้อง = dovere (Falling) | คุย = parlare (Mid)           │
+├─────────────────────────────────────────────────────────────┤
+│ 📖 BRITISH COUNCIL GRAMMAR RULE:                            │
+│     Semi-modal verbs such as 'need' require the full        │
+│     infinitive with 'to' when followed by another verb.     │
+│                                                             │
+│ 💬 GUILD MASTER:                                            │
+│     "ACCESS DENIED! Insert 'TO' token into the machine!"    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 Zero-Drift Style Grounding (The Three Canonical Archetypes)
+Unconstrained language models inevitably suffer from stylistic drift, alternating unpredictably between overly dry textbook summaries and informal banter. Linguo eliminates this through **Deterministic Slot-Filling** into **3 Canonical Archetypes**:
+
+1. **Tactical Military Arcade** *(Persona: Drill Sergeant)*: Applied to Articles and Definite Destination gaps (*"THE MARKET STAMP: NO 'THE', NO ENTRY! Stamp approved, soldier!"*).
+2. **Retro Sci-Fi Cyberpunk** *(Persona: Time Navigator)*: Applied to Tense and Aspect confusions (*"THE TIME PARADOX: Time stream breached! Drop present tense before the continuum breaks!"*).
+3. **Fantasy RPG Guild** *(Persona: Guild Master)*: Applied to Verb Patterns and Prepositional Tolls (*"THE 'TO' TOLL: Insert 'TO' token into the machine!"*).
+
+### 4.3 Adaptive Mastery Lifecycle & Recidivism Detection
+* **Active Status (`is_mastered = 0`)**: Cards remain in the active daily recall deck.
+* **Auto-Mastery (`is_mastered = 1`)**: When the learner demonstrates **3 consecutive error-free usages** of the target syntactical structure across subsequent dictations, the card automatically graduates to the Mastered archive.
+* **Recidivism Reactivation**: If the same structural error is detected again in future speech, the card is immediately unmastered and placed back into the active deck.
+* **Anki TSV Integration**: Puzzles, phonetic tables, and British Council rules export directly into Anki Desktop and AnkiMobile via tab-separated values.
+
+---
+
+## 5. Contrastive Linguistics & Acoustic Didactics
+
+### 5.1 English $\leftrightarrow$ Thai Cross-Linguistic Matrix
+For adult native speakers of non-inflected tonal languages (such as Thai, Vietnamese, or Mandarin), English presents specific phonological and morphosyntactic hurdles. Linguo explicitly scaffolds these transfer gaps:
+
+```mermaid
+flowchart LR
+    subgraph EnglishMorphology["English Target Traps"]
+        Art["Definite / Indefinite Articles<br/>(the market vs. a market)"]
+        Inf["Infinitive vs. Gerund Complements<br/>(need to do vs. enjoy doing)"]
+        Tense["Tense-Aspect Inflections<br/>(go / went / gone)"]
+        Agree["Third-Person Singular -s<br/>(he likes vs. they like)"]
+    end
+
+    subgraph ThaiContrast["Thai Structural Anchor"]
+        T1["Zero Article System<br/>(ไปตลาด = go market)"]
+        T2["Particle-Based Modality<br/>(ต้อง = must/need, zero 'to')"]
+        T3["Aspect Markers without Conjugation<br/>(แล้ว = completed aspect)"]
+        T4["Zero Subject-Verb Agreement<br/>(ชอบ = invariant verb)"]
+    end
+
+    Art <--> T1
+    Inf <--> T2
+    Tense <--> T3
+    Agree <--> T4
+```
+
+### 5.2 Acoustic Phonetics: The 0.8x Didactic Benchmark
+Normal native conversational speech ($175\text{ wpm}$) causes non-native listeners to miss critical unstressed function words (articles, prepositions, consonant clusters). Linguo mathematically calibrates its speech engines:
+$$\text{Didactic Rate} = 175 \times 0.80 = 140\text{ wpm}$$
+* **English Neural TTS**: Kokoro-82M (82-million parameter neural model operating locally on CPU) or Studio Edge-TTS, rendering British (`af_nicole`) and American (`am_adam`, `Alex`, `Samantha`) phonetic models.
+* **Thai Tonal Paiboon Transliteration**: Pairs Thai script with standardized Paiboon phonetic spelling and explicit 5-tone pitch indicators:
+  $$\text{Mid (M)} \quad|\quad \text{Low (L)} \quad|\quad \text{High (H)} \quad|\quad \text{Falling (F)} \quad|\quad \text{Rising (R)}$$
+
+---
+
+## 6. System Architecture & Topology
+
+Linguo combines a lightweight, native client on macOS with an optional high-performance inference and telemetry server.
 
 ```mermaid
 flowchart TD
-    RawInput["User Input (Spoken or Typed English)"] --> Gate1["⚡ GATE 1: Real-Time Fast Coach (<0.5s)<br/>• Model: gemini-3.6-flash-low (low effort)<br/>• Profile: linguo-fast (tools: [])<br/>• Output: Pydantic v2 LinguoAnalysis"]
+    subgraph Client["macOS Client Environment"]
+        Mic["Hardware Audio Capture (AVFoundation)"]
+        MenuAgent["macOS Menu Bar Agent 🎙️ (PyObjC)"]
+        MetalGUI["16-bit MTG HUD (Rust dash-gui / wgpu / 60fps)"]
+        LocalPy["Local Python Engine (bin/linguo)<br/>• SQLite WAL Storage<br/>• Offline Say / Kokoro TTS Fallback"]
+    end
 
-    Gate1 --> Gate2{"🛡️ GATE 2: Content Moderation & Safety Gate<br/>(Deterministic Regex + Semantic Classifier)"}
+    subgraph Network["Resilient Network Dispatch"]
+        Tier1["Tier 1: Private WireGuard VPN<br/>(10.0.0.2:8765, 1ms latency)"]
+        Tier2["Tier 2: Cloudflare Anycast Tunnel<br/>(linguo.princyx.xyz, Global Public)"]
+        Tier3["Tier 3: Local Offline Execution<br/>(Zero network dependency)"]
+    end
 
-    Gate2 -- "Sensitive / NSFW Content Detected<br/>(Weapons, Drugs, Violence, Sex, Slurs)" --> SafePolicy["Pedagogical Action:<br/>1. Grammar correction provided to user<br/>2. error_category = 'SENSITIVE_NO_CARD'<br/>3. STRICT BLOCK on MTG arcade card minting"]
+    subgraph Server["Institutional Server (Dell Precision 7670)"]
+        API["FastAPI Remote Server (scripts/linguo_server.py)<br/>• Bearer Token Authentication<br/>• Distributed W3C Trace Context"]
+        AGY["Antigravity CLI (AGY)<br/>• gemini-3.6-flash-low (Coach)<br/>• gemini-3.8-flash-high (Audit)"]
+        Prometheus["Prometheus /metrics Endpoint<br/>• Request Rates & Latency Histograms<br/>• Token Spend & Gate Trigger Metrics"]
+        Loki["Structured NDJSON Telemetry<br/>• Vector / Promtail / Grafana Loki Ingestion"]
+    end
 
-    Gate2 -- "Standard Educational Content" --> StandardPolicy["Standard Action:<br/>1. Grammar analysis & CEFR rating<br/>2. Thai beginner script & Paiboon tones<br/>3. Commit record to SQLite history table"]
-
-    StandardPolicy --> ClusterCheck{"Recurring Gap Audit Trigger<br/>(linguo --audit / batch)"}
-
-    ClusterCheck --> Gate3["🧠 GATE 3: Deep Pedagogical Audit Gate<br/>• Model: gemini-3.8-flash-high (effort: high)<br/>• Verification 1: British Council Grammar Rule<br/>• Verification 2: Paiboon 5-Tone Phonetics<br/>• Verification 3: Slot-Filling into 3 Archetypes"]
-
-    Gate3 --> CommitCard["🎴 Mint / Reactivate Puzzle Card in cards Table"]
-```
-
-### Gate Specification
-
-| Gate | Model / Engine | Latency | Responsibility | Constraints |
-| :--- | :--- | :--- | :--- | :--- |
-| **Gate 1** | `gemini-3.6-flash-low` | <0.5s | Immediate feedback, CEFR rating (A1-C1), Level-Up phrasing, Thai transliteration. | Zero tool calls (`tools: []`), minimal token footprint. |
-| **Gate 2** | Deterministic Regex + Classifier | <1ms | Decorum and safety filtering for weapons, illicit substances, NSFW, and hate speech. | Educational correction is retained; card minting is strictly suppressed via `SENSITIVE_NO_CARD`. |
-| **Gate 3** | `gemini-3.8-flash-high` | ~2-4s | Deep pedagogical audit for recurring gap clusters (`linguo audit`). | Reasoning effort `high`. Enforces British Council grammar rules, Paiboon tone verification, and 3 canonical archetypes. |
-
----
-
-## 5. Style Grounding & Zero-Drift Archetype Architecture
-
-To prevent generative models from degrading or altering style, humor, or formatting over time, Linguo forbids freeform markdown creation for cards. It enforces **Deterministic Slot-Filling** into **3 Canonical Archetypes** stored permanently in SQLite:
-
-```mermaid
-classDiagram
-    class CardArchetypeSlotSchema {
-        +string card_title (UPPERCASE 2-4 words)
-        +string card_type (Canonical Genre)
-        +string cefr_level (A1|A2|B1|B2|C1)
-        +string front_challenge (Single [ ? ] blank)
-        +string back_solution (Capitalized solution word)
-        +string british_council_rule (Rigorous 1-sentence grammar rule)
-        +string gag_quote (In-character persona quote)
-        +string thai_script (2-4 word core beginner Thai)
-        +string thai_phonetic (Latin Paiboon phonetics)
-        +string thai_tones (Explicit tone sequence M/L/H/F/R)
-        +string thai_breakdown (Word-by-word gloss)
-        +string sprite_name (16-bit arcade asset reference)
-    }
-
-    class Archetype1_Military {
-        <<Tactical Military Arcade>>
-        +Persona: Drill Sergeant
-        +Theme: Stamp / Border Patrol
-        +Target: Articles (THE MARKET STAMP), Agreement
-    }
-
-    class Archetype2_SciFi {
-        <<Retro Sci-Fi Cyberpunk>>
-        +Persona: Time Traveler / Navigator
-        +Theme: Chrono Paradox / Warp
-        +Target: Tenses (THE TIME PARADOX), Word Order
-    }
-
-    class Archetype3_RPG {
-        <<Fantasy RPG Guild>>
-        +Persona: Guild Master / Dungeon Master
-        +Theme: Toll Token / Life Vest / Relic
-        +Target: Verb Patterns (THE 'TO' TOLL), Prepositions
-    }
-
-    CardArchetypeSlotSchema <|-- Archetype1_Military
-    CardArchetypeSlotSchema <|-- Archetype2_SciFi
-    CardArchetypeSlotSchema <|-- Archetype3_RPG
+    Mic --> MenuAgent
+    MenuAgent --> LocalPy
+    MetalGUI --> Tier1
+    LocalPy --> Tier1
+    Tier1 -- "Fail / Offline" --> Tier2
+    Tier2 -- "Fail / Offline" --> Tier3
+    Tier1 --> API
+    Tier2 --> API
+    API --> AGY
+    API --> Prometheus
+    API --> Loki
+    Tier3 --> LocalPy
 ```
 
 ---
 
-## 6. Persistence & Card Lifecycle State Machine
+## 7. Institutional Observability & Telemetry
 
-All application records are persisted in a thread-safe SQLite database running in Write-Ahead Logging (WAL) mode (`~/.local/share/linguo/history.db`).
+For deployment within university language labs and British Council testing centers, Linguo complies with enterprise SRE observability standards:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Ingested: Voice / Text Analysis
-    Ingested --> HistorySaved: Insert history row
-
-    state "Card Generation & Spaced Repetition" as CardEngine {
-        HistorySaved --> AuditCluster: Group by error_category
-        AuditCluster --> Gate2Check: Check category
-        Gate2Check --> Ignored: SENSITIVE_NO_CARD / NONE
-        Gate2Check --> MintNew: No existing card
-        Gate2Check --> UpdateExisting: Existing card in deck
-
-        MintNew --> ActiveDeck: is_mastered = 0
-        UpdateExisting --> ActiveDeck: append source_history_ids
-
-        ActiveDeck --> StreakEvaluator: Subsequent transcriptions
-        StreakEvaluator --> ActiveDeck: Streak < 3 clean usages
-        StreakEvaluator --> Mastered: Streak >= 3 clean usages (Auto-Mastery)
-        Mastered --> ActiveDeck: Recidivism detected (Error recurs)
-    }
-
-    ActiveDeck --> AnkiExport: linguo --export
-    Mastered --> AnkiExport
-```
-
-### Database Schema Definition
-
-```sql
--- Historical transcriptions and speech analyses
-CREATE TABLE history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    original_text TEXT NOT NULL,
-    is_correct INTEGER NOT NULL,
-    corrected_english TEXT NOT NULL,
-    grammar_tip TEXT,
-    thai_script TEXT NOT NULL,
-    thai_phonetic TEXT NOT NULL,
-    thai_breakdown TEXT,
-    audio_thai_path TEXT,
-    audio_eng_path TEXT,
-    english_level TEXT DEFAULT 'B1',
-    english_better_alternative TEXT,
-    pronunciation_tip TEXT,
-    thai_grammar_tip TEXT,
-    is_starred INTEGER DEFAULT 0,
-    error_category TEXT DEFAULT 'NONE'
-);
-
--- Active Recall MTG Puzzle Cards
-CREATE TABLE cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    error_category TEXT NOT NULL,
-    sprite_name TEXT NOT NULL,
-    card_title TEXT NOT NULL,
-    cefr_level TEXT DEFAULT 'B1',
-    card_type TEXT NOT NULL,
-    front_challenge TEXT NOT NULL,
-    back_solution TEXT NOT NULL,
-    british_council_rule TEXT NOT NULL,
-    gag_quote TEXT,
-    thai_script TEXT NOT NULL,
-    thai_phonetic TEXT NOT NULL,
-    thai_tones TEXT NOT NULL,
-    thai_breakdown TEXT,
-    source_history_ids TEXT,
-    is_mastered INTEGER DEFAULT 0
-);
-
--- Immutable Canonical Card Archetypes
-CREATE TABLE card_archetypes (
-    category TEXT PRIMARY KEY,
-    sprite_name TEXT NOT NULL,
-    card_title TEXT NOT NULL,
-    cefr_level TEXT DEFAULT 'B1',
-    card_type TEXT NOT NULL,
-    front_challenge TEXT NOT NULL,
-    back_solution TEXT NOT NULL,
-    british_council_rule TEXT NOT NULL,
-    gag_quote TEXT,
-    thai_script TEXT NOT NULL,
-    thai_phonetic TEXT NOT NULL,
-    thai_tones TEXT NOT NULL,
-    thai_breakdown TEXT
-);
-```
+* **Prometheus Metrics (`GET /metrics`)**: Exposes request rates (`linguo_requests_total`), latency histograms partitioned by inference engine (`linguo_inference_duration_seconds`), active connections, and safety gate activations.
+* **Structured NDJSON Event Streaming**: Emits single-line JSON log events (`linguo_events.jsonl` and stdout) for instantaneous ingestion by Vector, Promtail, and Grafana Loki.
+* **Distributed W3C Tracing (`X-Trace-Id`)**: Propagates end-to-end trace IDs from macOS client clicks through to the Dell backend, enabling complete performance profiling in Grafana Tempo.
+* **Automated Health Probes**: Dual `/health/live` (process liveness) and `/health/ready` (validates runtime file system permissions and CLI engine readiness).
 
 ---
 
-## 7. Multi-Tier Audio Synthesis Pipeline
+## 8. Demonstration & Quickstart Guide
 
-Audio generation is decoupled from client latency through a background worker running at reduced CPU priority (`nice -n 15`).
+### 8.1 System Requirements
+* **Operating System**: macOS 13+ (Apple Silicon or Intel).
+* **Python**: Python 3.10+ (with Pydantic v2).
+* **Rust**: Rust 1.80+ (optional, for compiling the native Metal HUD).
+* **Audio Tools**: `ffmpeg` (for microphone ingestion).
 
-```mermaid
-flowchart TD
-    Worker["Background Worker (nice -n 15)"] --> EngineSelect{"TTS Engine Configuration"}
-
-    EngineSelect --> EnglishEngine["English Synthesis"]
-    EnglishEngine --> Kokoro["Tier 1: Kokoro-82M Local Neural<br/>• Voice: af_nicole @ 0.8x pace<br/>• Threads: torch.set_num_threads(2)<br/>• 100% Offline (24kHz)"]
-    Kokoro -- "Fallback" --> SayEng["Tier 2: macOS say -v Samantha"]
-
-    EngineSelect --> ThaiEngine["Thai Synthesis"]
-    ThaiEngine --> CacheCheck{"Disk Cache Check<br/>MD5(text_0.8).mp3"}
-    CacheCheck -- "Hit" --> CachedFile["~/.local/share/linguo/cache/thai/"]
-    CacheCheck -- "Miss" --> EdgeTTS["Tier 1: Edge-TTS Azure Neural<br/>• Voice: th-TH-PremwadeeNeural @ 0.8x<br/>• Pre-seeded: 75 survival bricks"]
-    EdgeTTS -- "Fallback / Offline" --> SayThai["Tier 2: macOS say -v Kanya"]
-
-    CachedFile --> Playback["Output Audio Devices"]
-    Kokoro --> Playback
-    SayEng --> Playback
-    SayThai --> Playback
-```
-
----
-
-## 8. Frontend & User Interface Architectures
-
-### 8.1 Native Desktop HUD ([`gui/dash-gui`](file:///Users/sam/linguo/gui/dash-gui))
-* **Technology**: Rust 2021, `eframe` (egui 0.28) utilizing the macOS **Metal** graphics backend.
-* **Performance Profile**: 60 frames per second, 0.0% CPU at idle, ~15 MB resident memory.
-* **Typography**: Integrated Apple TrueType font `/System/Library/Fonts/Supplemental/Ayuthaya.ttf` for native Thai glyph rendering.
-* **Window Features**: Always-on-Top floating pinning (`[P]`), interactive live coaching search bar, interactive Configuration Matrix modal (`⚙️ Config` / `[C]`), and full keyboard navigation.
-
-### 8.2 macOS Menu Bar Accessory
-* **Technology**: PyObjC Cocoa (`NSStatusBar`, `NSStatusItem`).
-* **Lifecycle**: Managed via user `launchd` agent (`~/Library/LaunchAgents/com.linguo.bar.plist`).
-* **Interaction**:
-  * Left-Click: Toggle voice capture (`🔴 Rec...` -> `⚡ Proc...` -> `🎙️`).
-  * Right-Click: Native contextual menu (Practice toggle, open HUD, clean quit).
-
-### 8.3 Terminal ADHD Curses Board (`lb`)
-* **Technology**: Python standard `curses` split-view terminal interface.
-* **Features**: Active recall flashcard masking (`f`), 3-cycle audio loop (`l`), favorite bookmarking (`s`), and unrevealed mystery testing.
-
----
-
-## 9. Observability, Latency Tracing & Diagnostics
-
-### 9.1 Diagnostic Verification Engine (`linguo --doctor`)
-Verifies all 7 structural pillars of the operating environment:
-
-| Pillar | Subsystem Checked | Verification Criteria |
-| :--- | :--- | :--- |
-| **1. Engine Core & DB** | Python 3.12, Pydantic v2, SQLite | Pydantic v2 active, SQLite journal mode = WAL, mandatory tables present. |
-| **2. Audio Pipeline** | Kokoro-82M, Edge-TTS, `say` | PyTorch initialized, cache bricks verified, Samantha & Kanya voices present. |
-| **3. Permissions & TCC** | Microphone, System Events, `ffmpeg` | AVFoundation mic access granted, AppleScript keystroke permission enabled. |
-| **4. Rust Metal HUD** | `dash-gui` binary & typography | Compiled binary exists and is executable, Ayuthaya font located. |
-| **5. Active Recall Deck** | Spaced Repetition Engine | Active vs. mastered card counts verified, auto-mastery rules operational. |
-| **6. Logging & Tracing** | Retention & Profiling | Microsecond profiler operational, 30-day rotating log retention enforced. |
-| **7. Menu Bar Agent** | `launchd` / LaunchAgent | `com.linguo.bar.plist` registered and active in user session. |
-
-### 9.2 Fine-Grained Latency Profiling (`linguo --trace`)
-Profiles execution latency across each discrete stage of the pipeline:
-
-```text
-⏱️  Execution Latency Trace: 'I want to improve my...'
-  • 1_db_init             :    0.34 ms (  0.0%) 
-  • 2_clipboard_copy      :    8.12 ms (  0.6%) 
-  • 3_llm_inference       : 1245.50 ms ( 95.8%) ████████████████████
-  • 4_db_and_markdown_save:    4.20 ms (  0.3%) 
-  • 5_terminal_card_render:    1.15 ms (  0.1%) 
-  • 6_tts_worker_dispatch :    0.85 ms (  0.1%) 
-  ──────────────────────────────────────────
-  🏁 Total Pipeline       : 1260.16 ms
-```
-
----
-
-## 10. CLI Command Reference
+### 8.2 Installation
 
 ```bash
-# Core Operations
-linguo "Your sentence here"      # Run instant analysis & audio dispatch
-linguo --trace "Your sentence"   # Run analysis with detailed latency breakdown
-linguo -v                        # Record directly from microphone
+# 1. Clone the repository
+git clone https://github.com/gptprojectmanager/linguo.git
+cd linguo
 
-# Active Recall Deck (MTG Puzzle Cards)
-linguo --cards                   # View active recall challenge cards
-linguo --cards --flip 1          # Reveal solution, grammar rule, and gag for card #1
-linguo --cards --master 1        # Manually archive card #1 as mastered
-linguo --audit                   # Execute Gate 3 British Council audit via Flash 3.8 High
-linguo --audit --no-review       # Execute rapid audit without LLM escalation
+# 2. Run the automated installer (symlinks CLI and builds dependencies)
+./install.sh
 
-# User Interfaces
-linguo --gui                     # Launch native Rust Metal HUD (dash-gui)
-linguo --board                   # Open curses terminal board (lb)
-
-# Operational Configuration Matrix
-linguo config                    # Display full operational matrix table
-linguo config model <fast|balanced|pro>  # Set Real-Time Coach tier (Flash 3.6 / 3.7 / 3.8)
-linguo config card <canon|balanced|studio> # Set Card Production quality (0 Token / 3.7 / 3.8 High)
-linguo config tts <hybrid|local|edge>    # Set speech synthesis engine
-linguo config speed <0.75|0.8|1.0>       # Set didactic playback pace
-linguo config voice <nicole|samantha|adam|alex> # Set English voice (2 female + 2 male)
-linguo config route <auto|dell|local>    # Set network dispatch cascade
-linguo config reset              # Restore all parameters to canonical defaults
-
-# macOS Menu Bar Agent Management
-linguo --status-bar              # Display current launchd status of the menu bar agent
-linguo --install-bar             # Install and load ~/Library/LaunchAgents/com.linguo.bar.plist
-linguo --uninstall-bar           # Unload and remove LaunchAgent
-
-# Diagnostics & Maintenance
-linguo --doctor                  # Run full 7-pillar diagnostic verification
-linguo --logs                    # View recent entries from 30-day rotating logs
-linguo --preseed                 # Cache 75 core survival Thai audio bricks to disk
-linguo --export                  # Export active deck to Anki-compatible TSV format
+# 3. Optional: Compile the native 60fps Metal HUD
+./install_gui.sh
 ```
 
----
+### 8.3 Evaluator Live Demo Script (3-Minute Walkthrough)
 
-## 11. Security & Pre-Commit Gates
+#### Step 1: Real-Time Formative Diagnosis
+Submit a phrase featuring a common cross-linguistic transfer error:
+```bash
+linguo "I go to market yesterday with my friend"
+```
+*Expected Output*: Instantaneous identification of the double error: missing definite article before specific location (*"to the market"*) and incorrect past tense inflection (*"went"*), accompanied by CEFR rating and Thai contrastive Paiboon gloss.
 
-* **Deterministic Secret Scanner**: [`scripts/check_secrets.sh`](file:///Users/sam/linguo/scripts/check_secrets.sh) scans all staged and working files for cloud tokens, private keys, and API secrets prior to any git commit.
-* **Pre-Commit Hook**: Automated validation runs on every commit via `.git/hooks/pre-commit`.
-* **CI Verification**: GitHub Actions automatically runs automated testing and secret scans on pull requests and releases.
+#### Step 2: Content Decorum Filter (Gate 2 Safety)
+Submit a sensitive phrase to observe pedagogical decorum:
+```bash
+linguo "He wanted to buy a gun before shooting"
+```
+*Expected Output*: Grammatical repair is provided professionally, but Gate 2 flags `SENSITIVE_NO_CARD`. Card creation is blocked to maintain an educational environment.
 
----
+#### Step 3: British Council Gap Audit (Gate 3)
+Trigger a deep pedagogical audit on recorded gaps:
+```bash
+linguo --audit
+```
+*Expected Output*: A senior examiner audit using `gemini-3.8-flash-high` synthesizes recurring learner errors into a canonical British Council rule and generates an immutable challenge card.
 
-## 12. Verification & Automated Test Suite
+#### Step 4: Launch the 16-Bit MTG Active Recall HUD
+```bash
+linguo-gui
+# Or open /Applications/Linguo.app
+```
+*Interact*: Use the `Spacebar` to test active recall, `E` to listen to 0.8x English neural speech, `T` for Thai Paiboon pronunciation, and `M` to toggle mastery.
 
-Run the full end-to-end regression suite ([`tests/test_all.sh`](file:///Users/sam/linguo/tests/test_all.sh)):
-
+#### Step 5: Execute the Unified Test Suite
+Verify that all 46 automated unit tests, Pydantic schemas, and Prometheus endpoints pass:
 ```bash
 ./tests/test_all.sh
 ```
 
-Verifies:
-1. Python syntax & compilation
-2. Pydantic v2 schema validation & auto-healing
-3. 7-pillar system diagnostics (`linguo --doctor`)
-4. SQLite WAL persistence & table integrity
-5. British Council gap audit engine
-6. Anki TSV export generator
-7. Rust `dash-gui` Metal binary compilation & execution
-8. Gate 2 Content Moderation & `SENSITIVE_NO_CARD` filtering
-9. macOS LaunchAgent registration status
-
 ---
 
-## 13. Packaging & Distribution (macOS Zero-Terminal Setup)
+## 9. Academic & Technical Governance
 
-For non-technical users requiring a zero-terminal installation:
-
-1. **DMG Distribution**: Run [`scripts/bundle_dmg.sh`](file:///Users/sam/linguo/scripts/bundle_dmg.sh) to generate `dist/Linguo-0.3.1.dmg`.
-2. **Installation**: Open the DMG and drag `Linguo.app` into `/Applications`.
-3. **Usage**: Click the `🎙️` icon in the macOS menu bar or open `Linguo.app` to interact with the practice HUD. Zero terminal access or shell commands are required.
+* **Authors**: Linguo Applied Linguistics & AI Systems Group
+* **License**: MIT License
+* **Repository**: [https://github.com/gptprojectmanager/linguo](https://github.com/gptprojectmanager/linguo)
+* **Citation**: If utilizing Linguo for SLA research or computer-assisted language learning trials, please cite this repository as an open CALL reference implementation.
