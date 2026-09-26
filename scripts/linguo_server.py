@@ -49,6 +49,7 @@ if PROMETHEUS_AVAILABLE:
 
 # Security Token (default fallback or environment)
 API_SECRET_TOKEN = os.environ.get("LINGUO_API_TOKEN", "linguo-secret-key-2026-linguo-coach")
+WORKSPACE_DIR = Path(os.environ.get("LINGUO_WORKSPACE_DIR", Path.home() / ".local" / "share" / "linguo" / "workspace"))
 
 SENSITIVE_KEYWORDS = {
     # Weapons / Violence
@@ -229,7 +230,7 @@ def health_readiness():
     agy_bin = Path.home() / ".local" / "bin" / "agy"
     agy_present = agy_bin.exists() or shutil.which("agy") is not None
 
-    workspace = Path.home() / ".local" / "share" / "linguo" / "workspace"
+    workspace = WORKSPACE_DIR
     workspace_writable = False
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -265,7 +266,7 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
     if not agy_bin.exists():
         agy_bin = Path("agy")
 
-    workspace = Path.home() / ".local" / "share" / "linguo" / "workspace"
+    workspace = WORKSPACE_DIR
     workspace.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -343,7 +344,7 @@ def audit_cluster(req: AuditRequest, authenticated: bool = Depends(verify_token)
     if not agy_bin.exists():
         agy_bin = Path("agy")
 
-    workspace = Path.home() / ".local" / "share" / "linguo" / "workspace"
+    workspace = WORKSPACE_DIR
     workspace.mkdir(parents=True, exist_ok=True)
 
     samples_data = [{"original": s.original, "corrected": s.corrected, "tip": s.tip} for s in req.samples[:5]]

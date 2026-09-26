@@ -90,9 +90,14 @@ assert res['error_category'] == 'SENSITIVE_NO_CARD', f'Expected SENSITIVE_NO_CAR
 echo "✅ OK"
 
 # 10. macOS LaunchAgent Menu Bar Agent
-echo -n "  [10/10] macOS Menu Bar LaunchAgent agent... "
+echo -n "  [10/11] macOS Menu Bar LaunchAgent agent... "
 linguo --status-bar >/dev/null 2>&1
 echo "✅ OK"
 
+# 11. Full Isolated E2E Sandbox Lifecycle Test
+echo "  [11/11] Full Isolated E2E Sandbox Lifecycle Test..."
+python3 "$SCRIPT_DIR/tests/test_e2e_isolated.py" >/dev/null 2>&1
+echo "  ✅ OK: Complete E2E sandbox lifecycle passed with strict host non-contamination"
+
 echo ""
-echo "🎉 ALL 10 TESTS PASSED! Linguo Core, API Server, and Native HUD are verified and operational."
+echo "🎉 ALL 11 TEST PHASES PASSED! Linguo Core, API Server, Native HUD, and Isolated E2E Sandbox are 100% verified."

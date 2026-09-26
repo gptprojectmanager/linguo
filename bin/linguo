@@ -195,7 +195,7 @@ home_local_bin = str(Path.home() / ".local" / "bin")
 current_path = os.environ.get("PATH", "")
 os.environ["PATH"] = f"{home_local_bin}:/opt/local/bin:/usr/local/bin:{current_path}"
 
-DATA_DIR = Path.home() / ".local" / "share" / "linguo"
+DATA_DIR = Path(os.environ.get("LINGUO_DATA_DIR", Path.home() / ".local" / "share" / "linguo"))
 AUDIO_DIR = DATA_DIR / "audio"
 DB_PATH = DATA_DIR / "history.db"
 LOG_PATH = DATA_DIR / "history.md"
