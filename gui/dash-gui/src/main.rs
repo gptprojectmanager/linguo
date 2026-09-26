@@ -829,8 +829,8 @@ fn save_remote_analysis_to_db(db_path: &Path, original_phrase: &str, ana: &Remot
     )?;
     let history_id = conn.last_insert_rowid();
 
-    // If incorrect, add MTG card if not already active
-    if !ana.is_correct && cat != "NONE" && !cat.is_empty() {
+    // If incorrect, add MTG card if not already active (Gate 2 Safety: block SENSITIVE_NO_CARD)
+    if !ana.is_correct && cat != "NONE" && cat != "SENSITIVE_NO_CARD" && !cat.is_empty() {
         let mut check_stmt = conn.prepare("SELECT id FROM cards WHERE error_category = ?1 AND is_mastered = 0")?;
         let exists = check_stmt.exists(params![cat])?;
         if !exists {

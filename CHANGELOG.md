@@ -4,6 +4,24 @@ All notable changes to **Linguo** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-09-26
+
+### 🎙️ macOS Menu Bar LaunchAgent & 3-Gate Quality Pipeline
+- **macOS Menu Bar LaunchAgent (`com.linguo.bar.plist`)**:
+  - Automatically loads and runs the 🎙️ menu bar accessory on macOS login.
+  - Native contextual menu on right click: Start/Stop voice recording, Open Metal HUD, Run Doctor diagnostics, and Clean Quit.
+  - Thread-safe UI updates and zero-terminal lifecycle management (`linguo --install-bar`, `linguo --uninstall-bar`, `linguo --status-bar`).
+  - Added as Pillar 7 in `linguo --doctor`.
+- **Gate 2: Content Moderation & Sensitive Filter**:
+  - Fast deterministic keyword & phrase filter for sensitive/NSFW topics (weapons, violence, illicit drugs, sexual content, hate speech).
+  - Pedagogical corrections and Thai translations are preserved, but tagged with `SENSITIVE_NO_CARD` to strictly prevent gamified MTG card minting.
+- **Gate 3: Deep Pedagogical Audit via Gemini 3.8 Flash High**:
+  - Upgraded recurring gap auditing (`linguo --audit`) to invoke `gemini-3.8-flash-high` with high reasoning effort.
+  - Validates British Council grammar accuracy and Paiboon tonal marks (Low, Mid, High, Falling, Rising).
+  - Enforces deterministic slot-filling into 3 immutable canonical archetypes (Tactical Military Arcade, Retro Sci-Fi Cyberpunk, Fantasy RPG Guild) to eliminate stylistic drift over time.
+- **Test Suite Expansion**:
+  - Automated test suite upgraded to 9/9 automated tests verifying Pydantic v2 schemas, WAL SQLite, Gate 2 safety filters, and LaunchAgent status.
+
 ---
 
 ## [0.3.1] - 2026-09-26
