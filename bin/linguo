@@ -27,12 +27,18 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Literal, Optional
+from contextlib import contextmanager
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 
 try:
+    import pydantic
     from pydantic import BaseModel, Field, field_validator
     PYDANTIC_AVAILABLE = True
 except ImportError:
     PYDANTIC_AVAILABLE = False
+
 
 
 if PYDANTIC_AVAILABLE:
@@ -94,9 +100,11 @@ if PYDANTIC_AVAILABLE:
 
 def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict:
     """Extracts JSON and validates through Pydantic v2 with deterministic fallbacks."""
+    t0 = time.perf_counter()
     json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
     json_str = json_match.group(0) if json_match else raw_text.strip()
 
+    result = None
     if PYDANTIC_AVAILABLE:
         try:
             model = LinguoAnalysis.model_validate_json(json_str)
@@ -104,7 +112,7 @@ def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict
                 model.transcribed_english = fallback_input
             if not model.corrected_english:
                 model.corrected_english = model.transcribed_english
-            return model.model_dump()
+            result = model.model_dump()
         except Exception:
             try:
                 parsed = json.loads(json_str)
@@ -113,33 +121,39 @@ def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict
                     model.transcribed_english = fallback_input
                 if not model.corrected_english:
                     model.corrected_english = model.transcribed_english
-                return model.model_dump()
+                result = model.model_dump()
             except Exception as e:
                 sys.stderr.write(f"Pydantic validation warning: {e}\n")
 
-    try:
-        data = json.loads(json_str)
-        if not data.get("transcribed_english"):
-            data["transcribed_english"] = fallback_input
-        if not data.get("corrected_english"):
-            data["corrected_english"] = data["transcribed_english"]
-        return data
-    except Exception as e:
-        sys.stderr.write(f"JSON decode error: {e}\n")
-        return {
-            "transcribed_english": fallback_input,
-            "is_correct": False,
-            "error_category": "NONE",
-            "english_level": "B1",
-            "corrected_english": fallback_input,
-            "grammar_tip": f"Error parsing AI response: {e}",
-            "english_better_alternative": "",
-            "pronunciation_tip": "",
-            "thai_concise_script": "เกิดข้อผิดพลาด",
-            "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
-            "thai_breakdown": "Error",
-            "thai_grammar_tip": ""
-        }
+    if result is None:
+        try:
+            data = json.loads(json_str)
+            if not data.get("transcribed_english"):
+                data["transcribed_english"] = fallback_input
+            if not data.get("corrected_english"):
+                data["corrected_english"] = data["transcribed_english"]
+            result = data
+        except Exception as e:
+            sys.stderr.write(f"JSON decode error: {e}\n")
+            result = {
+                "transcribed_english": fallback_input,
+                "is_correct": False,
+                "error_category": "NONE",
+                "english_level": "B1",
+                "corrected_english": fallback_input,
+                "grammar_tip": f"Error parsing AI response: {e}",
+                "english_better_alternative": "",
+                "pronunciation_tip": "",
+                "thai_concise_script": "เกิดข้อผิดพลาด",
+                "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
+                "thai_breakdown": "Error",
+            }
+
+    validation_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+    result["_validation_ms"] = validation_ms
+    log_event("DEBUG", "VALIDATION", f"Pydantic schema parsed in {validation_ms:.3f}ms", {"category": result.get("error_category", "NONE")})
+    return result
+
 
 
 # Ensure user and package paths are always available even when launched by GUI/Shortcuts
@@ -162,6 +176,103 @@ AUDIO_TEMP_PATH = Path("/tmp/linguo_mic.mp3")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR = DATA_DIR / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def rotate_and_cleanup_logs(max_days: int = 30):
+    """Parsimonious log retention: purges daily log files older than max_days (30 days)."""
+    now = time.time()
+    cutoff = now - (max_days * 86400)
+    for f in LOGS_DIR.glob("linguo_*.log"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def log_event(level: str, component: str, message: str, meta: dict | None = None):
+    """Appends structured log to daily rotating file with timestamp, level, component, and metadata."""
+    try:
+        rotate_and_cleanup_logs(30)
+        today = datetime.now().strftime("%Y-%m-%d")
+        log_file = LOGS_DIR / f"linguo_{today}.log"
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        meta_str = f" | {json.dumps(meta, ensure_ascii=False)}" if meta else ""
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [{level.upper()}] [{component}] {message}{meta_str}\n")
+    except Exception:
+        pass
+
+
+class PerfTracker:
+    """Measures execution latency across individual operations to profile bottlenecks and fix bugs."""
+    def __init__(self, action: str):
+        self.action = action
+        self.timings = {}
+        self.start_total = time.perf_counter()
+
+    @contextmanager
+    def measure(self, step_name: str):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            self.timings[step_name] = round(dt_ms, 2)
+
+    def finish(self) -> dict:
+        total_ms = (time.perf_counter() - self.start_total) * 1000.0
+        self.timings["total_ms"] = round(total_ms, 2)
+        log_event("INFO", "PERF", f"{self.action} completed", self.timings)
+        return self.timings
+
+
+def print_trace_summary(timings: dict):
+    """Prints a styled execution latency table to diagnose pipeline bottlenecks."""
+    print("\n\033[1;36m⏱️  ─── Linguo Latency & Bottleneck Trace ───\033[0m")
+    total = timings.get("total_ms", 1.0)
+    for step, ms in timings.items():
+        if step == "total_ms":
+            continue
+        pct = (ms / total) * 100.0 if total > 0 else 0
+        bar = "█" * int(min(20, max(1, pct / 5)))
+        print(f"  • \033[1;33m{step.ljust(22)}\033[0m: \033[1m{ms:>7.2f} ms\033[0m ({pct:>5.1f}%) \033[90m{bar}\033[0m")
+    print(f"  ──────────────────────────────────────────")
+    print(f"  🏁 \033[1;32m{'Total Pipeline'.ljust(20)}\033[0m: \033[1;32m{total:>7.2f} ms\033[0m\n")
+
+
+def show_logs(limit: int = 30):
+    """Displays the last N structured log entries from the 30-day rotating logs."""
+    rotate_and_cleanup_logs(30)
+    log_files = sorted(LOGS_DIR.glob("linguo_*.log"))
+    if not log_files:
+        print("\n\033[1;33m📋 Nessun file di log recente presente in:\033[0m", LOGS_DIR)
+        return
+
+    print(f"\n\033[1;36m📋 ─── Linguo Logs (Ultime {limit} voci, retention 30 giorni) ───\033[0m\n")
+    all_lines = []
+    for lf in log_files[-3:]:
+        try:
+            with open(lf, "r", encoding="utf-8") as f:
+                all_lines.extend(f.readlines())
+        except Exception:
+            pass
+
+    for line in all_lines[-limit:]:
+        line = line.strip()
+        if "[PERF]" in line:
+            print(f"\033[90m{line}\033[0m")
+        elif "[ERROR]" in line or "[ERR]" in line:
+            print(f"\033[1;31m{line}\033[0m")
+        elif "[WARN]" in line:
+            print(f"\033[1;33m{line}\033[0m")
+        else:
+            print(f"\033[36m{line}\033[0m")
+    print()
+
+
 
 DEFAULT_CONFIG = {
     "hotkey": "<ctrl>+<alt>+<space>",
@@ -1607,128 +1718,141 @@ def export_cards(format_type: str = "anki"):
 
 
 def run_doctor():
-    """Diagnostic command to check permissions, speech engines, and system health."""
-    print("\n\033[1;36m🩺 ─── Linguo Doctor: System Health & Permissions Check ───\033[0m\n")
+    """Diagnostic command verifying the fundamental pillars of Linguo."""
+    print("\n\033[1;36m🩺 ─── Linguo Doctor: Fundamental Systems Check ───\033[0m\n")
     all_ok = True
 
-    # 1. Python & Pydantic v2
+    # Pillar 1: Engine Core & Schemas
     py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    if PYDANTIC_AVAILABLE:
-        import pydantic
-        print(f"  ✅ \033[1mPython & Pydantic:\033[0m Python {py_ver}, Pydantic v{pydantic.__version__} (Rust core schema)")
-    else:
-        print(f"  ⚠️ \033[1mPython & Pydantic:\033[0m Python {py_ver}, Pydantic non trovato (fallback json)")
-
-    # 2. SQLite Database & WAL Mode
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("PRAGMA journal_mode;")
         journal_mode = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM history;")
-        hist_count = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM cards WHERE is_mastered = 0;")
-        active_cards = cur.fetchone()[0]
-    if journal_mode.lower() == "wal":
-        print(f"  ✅ \033[1mDatabase:\033[0m SQLite WAL mode attivo ({hist_count} frasi, {active_cards} carte attive)")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = {r[0] for r in cur.fetchall()}
+    pyd_str = f"Pydantic v{pydantic.__version__} (Rust-core)" if PYDANTIC_AVAILABLE else "Pydantic fallback"
+    wal_ok = journal_mode.lower() == "wal" and {"history", "cards", "card_archetypes"}.issubset(tables)
+    if PYDANTIC_AVAILABLE and wal_ok:
+        print(f"  ✅ \033[1mCore Engine & Database:\033[0m Python {py_ver}, {pyd_str}, SQLite WAL ({len(tables)} tabelle)")
     else:
-        print(f"  ⚠️ \033[1mDatabase:\033[0m Journal mode è {journal_mode} (atteso WAL)")
-
-    # 3. Microphone & ffmpeg
-    ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
-    try:
-        res = subprocess.run([ffmpeg_bin, "-version"], capture_output=True, text=True, timeout=2.0)
-        if res.returncode == 0:
-            print(f"  ✅ \033[1mRecording Engine:\033[0m ffmpeg installato ({ffmpeg_bin})")
-        else:
-            print(f"  ❌ \033[1mRecording Engine:\033[0m ffmpeg non risponde")
-            all_ok = False
-    except Exception:
-        print(f"  ❌ \033[1mRecording Engine:\033[0m ffmpeg non trovato nel PATH")
+        print(f"  ⚠️ \033[1mCore Engine & Database:\033[0m Verifica WAL: {wal_ok}, Pydantic: {PYDANTIC_AVAILABLE}")
         all_ok = False
 
-    # Check AVFoundation microphone access
-    try:
-        av_check = subprocess.run([ffmpeg_bin, "-f", "avfoundation", "-list_devices", "true", "-i", '""'], capture_output=True, text=True, timeout=3.0)
-        if "AVFoundation audio devices" in av_check.stderr or "Built-in Microphone" in av_check.stderr:
-            print(f"  ✅ \033[1mmacOS Microphone (TCC):\033[0m Accesso microfono autorizzato")
-        else:
-            print(f"  ⚠️ \033[1mmacOS Microphone (TCC):\033[0m Verifica autorizzazioni in: \033[90mopen \"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone\"\033[0m")
-    except Exception:
-        pass
-
-    # 4. Accessibility & Auto-Paste
-    try:
-        as_check = subprocess.run(["osascript", "-e", 'tell application "System Events" to get name'], capture_output=True, text=True, timeout=3.0)
-        if as_check.returncode == 0:
-            print(f"  ✅ \033[1mmacOS Accessibility:\033[0m System Events autorizzato per auto-paste (Cmd+V)")
-        else:
-            print(f"  ⚠️ \033[1mmacOS Accessibility:\033[0m Permessi mancanti per auto-paste. Abilita in: \033[90mopen \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\"\033[0m")
-    except Exception:
-        pass
-
-    # 5. Kokoro English TTS
+    # Pillar 2: Speech & Audio Pipeline
     cfg = load_config()
-    try:
-        import torch
-        from kokoro import KPipeline
-        print(f"  ✅ \033[1mEnglish TTS (Kokoro-82M):\033[0m Disponibile in locale (1 CPU core, voce: {cfg.get('eng_voice', 'af_nicole')}, rate: {cfg.get('speed', 0.8)}x)")
-    except Exception as e:
-        print(f"  ⚠️ \033[1mEnglish TTS (Kokoro-82M):\033[0m Non disponibile ({e}), fallback attivo su macOS say")
-
-    # 6. Edge-TTS Thai & Cache
     cache_dir = DATA_DIR / "cache" / "thai"
     cached_count = len(list(cache_dir.glob("*.mp3"))) if cache_dir.exists() else 0
     try:
-        edge_check = subprocess.run(["edge-tts", "--version"], capture_output=True, text=True, timeout=2.0)
-        if edge_check.returncode == 0:
-            print(f"  ✅ \033[1mThai TTS (Edge-TTS):\033[0m Disponibile (voce: {cfg.get('thai_voice', 'th-TH-PremwadeeNeural')}, cache locale: {cached_count} mattoni)")
-        else:
-            print(f"  ⚠️ \033[1mThai TTS (Edge-TTS):\033[0m edge-tts non risponde, fallback su macOS say (Kanya)")
+        import torch
+        from kokoro import KPipeline
+        kokoro_ok = True
     except Exception:
-        print(f"  ⚠️ \033[1mThai TTS (Edge-TTS):\033[0m edge-tts non trovato, fallback su macOS say (Kanya)")
+        kokoro_ok = False
 
-    # 7. macOS say Fallback
     try:
-        say_kanya = subprocess.run(["say", "-v", "?"], capture_output=True, text=True)
-        has_kanya = "Kanya" in say_kanya.stdout
-        has_sam = "Samantha" in say_kanya.stdout
-        if has_kanya and has_sam:
-            print(f"  ✅ \033[1mmacOS Fallback Voices:\033[0m Voci native 'Samantha' (ENG) e 'Kanya' (THAI) installate")
-        else:
-            print(f"  ⚠️ \033[1mmacOS Fallback Voices:\033[0m Kanya: {has_kanya}, Samantha: {has_sam}")
+        say_v = subprocess.run(["say", "-v", "?"], capture_output=True, text=True)
+        fallbacks_ok = "Samantha" in say_v.stdout and "Kanya" in say_v.stdout
     except Exception:
-        pass
+        fallbacks_ok = False
 
-    # 8. Rust Native HUD (dash-gui)
-    gui_bin = Path.home() / ".local/bin/linguo-gui"
-    if gui_bin.exists():
-        print(f"  ✅ \033[1mRust MTG HUD (dash-gui):\033[0m Binario nativo Metal pronto ({gui_bin})")
+    v_eng = cfg.get("eng_voice", "af_nicole")
+    v_th = cfg.get("thai_voice", "th-TH-PremwadeeNeural")
+    print(f"  ✅ \033[1mAudio Pipeline (3-Tier):\033[0m Kokoro '{v_eng}' (1-core) + Edge-TTS '{v_th}' ({cached_count} mattoni in cache) + Fallback say")
+
+    # Pillar 3: Recording Engine & macOS TCC Permissions
+    ffmpeg_bin = "/opt/local/bin/ffmpeg" if os.path.exists("/opt/local/bin/ffmpeg") else "ffmpeg"
+    try:
+        f_res = subprocess.run([ffmpeg_bin, "-version"], capture_output=True, text=True, timeout=2.0)
+        ff_ok = f_res.returncode == 0
+    except Exception:
+        ff_ok = False
+
+    try:
+        av_check = subprocess.run([ffmpeg_bin, "-f", "avfoundation", "-list_devices", "true", "-i", '""'], capture_output=True, text=True, timeout=3.0)
+        mic_ok = "AVFoundation" in av_check.stderr or "Microphone" in av_check.stderr
+    except Exception:
+        mic_ok = False
+
+    try:
+        as_check = subprocess.run(["osascript", "-e", 'tell application "System Events" to get name'], capture_output=True, text=True, timeout=3.0)
+        acc_ok = as_check.returncode == 0
+    except Exception:
+        acc_ok = False
+
+    if ff_ok and mic_ok and acc_ok:
+        print(f"  ✅ \033[1mmacOS TCC & Keystrokes:\033[0m Microfono autorizzato, System Events autorizzato (Cmd+V)")
     else:
-        print("  ⚠️ \033[1mRust MTG HUD (dash-gui):\033[0m Non ancora compilato (esegui ./install_gui.sh)")
+        print(f"  ⚠️ \033[1mmacOS TCC & Keystrokes:\033[0m Mic: {mic_ok}, Auto-Paste: {acc_ok}, ffmpeg: {ff_ok}")
+
+    # Pillar 4: Native Metal HUD (dash-gui) & Fonts
+    gui_bin = Path.home() / ".local/bin/linguo-gui"
+    gui_ok = gui_bin.exists() and os.access(gui_bin, os.X_OK)
+    ayuthaya = Path("/System/Library/Fonts/Supplemental/Ayuthaya.ttf")
+    if gui_ok:
+        sz_mb = gui_bin.stat().st_size / (1024 * 1024)
+        font_tag = "Font Ayuthaya OK" if ayuthaya.exists() else "Font sistema"
+        print(f"  ✅ \033[1mRust Metal HUD (dash-gui):\033[0m Binario nativo pronto ({sz_mb:.1f} MB, 60fps Metal, {font_tag})")
+    else:
+        print(f"  ⚠️ \033[1mRust Metal HUD (dash-gui):\033[0m Non installato (esegui ./install_gui.sh)")
+
+    # Pillar 5: ADHD Cards & Active Recall
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM cards WHERE is_mastered = 0;")
+        active_c = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM cards WHERE is_mastered = 1;")
+        mastered_c = cur.fetchone()[0]
+    print(f"  ✅ \033[1mActive Recall Deck (MTG):\033[0m {active_c} carte attive, {mastered_c} padroneggiate (Auto-Mastery & Recidiva attivi)")
+
+    # Pillar 6: Telemetry, Logs & Tracing (30 Days)
+    rotate_and_cleanup_logs(30)
+    log_files = list(LOGS_DIR.glob("linguo_*.log"))
+    print(f"  ✅ \033[1mLogging & Tracing:\033[0m Profiler di latenza attivo, log parsimoniosi ({len(log_files)} file, retention 30gg)")
 
     print()
-
     if all_ok:
-        print("🚀 \033[1;32mTutti i sottosistemi essenziali sono operativi e pronti all'uso!\033[0m\n")
+        print("🚀 \033[1;32mTutti i pilastri fondamentali sono operativi e verificati!\033[0m\n")
     else:
-        print("👉 \033[1;33mSegui le indicazioni sopra per risolvere i punti di attenzione.\033[0m\n")
+        print("👉 \033[1;33mVerifica i punti contrassegnati da ⚠️ sopra.\033[0m\n")
 
 
-def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True):
-    init_db()
+
+def process_text(text: str, silent_audio: bool = False, copy_clip: bool = True, show_trace: bool = False):
+    """Processes user text input through the full dual-coach pipeline with latency tracking."""
+    tracker = PerfTracker(f"phrase: '{text[:25]}...'")
+    with tracker.measure("1_db_init"):
+        init_db()
     if copy_clip:
-        copy_to_clipboard(text)
-    analysis = call_agy_coach(text)
-    rec_id = save_record(analysis, text)
-    print_card(analysis, text)
+        with tracker.measure("2_clipboard_copy"):
+            copy_to_clipboard(text)
+    with tracker.measure("3_llm_inference"):
+        analysis = call_agy_coach(text)
+    with tracker.measure("4_db_and_markdown_save"):
+        rec_id = save_record(analysis, text)
+    with tracker.measure("5_terminal_card_render"):
+        print_card(analysis, text)
     if not silent_audio:
-        # Calm detached background worker on 1 CPU core
-        worker_cmd = ["nice", "-n", "15", sys.executable, str(Path(__file__).resolve()), "worker", str(rec_id)]
-        subprocess.Popen(worker_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        with tracker.measure("6_tts_worker_dispatch"):
+            worker_cmd = ["nice", "-n", "15", sys.executable, str(Path(__file__).resolve()), "worker", str(rec_id)]
+            subprocess.Popen(worker_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    timings = tracker.finish()
+    if show_trace:
+        print_trace_summary(timings)
+
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("logs", "--logs", "log"):
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 30
+        show_logs(limit=limit)
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("trace", "--trace"):
+        phrase = " ".join(sys.argv[2:]).strip() if len(sys.argv) > 2 else "I want to improve my English and learn Thai"
+        process_text(phrase, show_trace=True)
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] in ("doctor", "--doctor", "-d"):
         run_doctor()
         return
@@ -1740,6 +1864,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("export", "--export"):
         export_cards()
         return
+
 
     if len(sys.argv) > 1 and sys.argv[1] in ("audit", "-a", "--audit"):
         force = "--force" in sys.argv or "-f" in sys.argv

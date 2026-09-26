@@ -30,3 +30,8 @@ target/
 **/target/
 Cargo.lock
 
+# Build Dist Artifacts
+dist/
+*.dmg
+*.app
+

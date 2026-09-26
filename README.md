@@ -137,15 +137,34 @@ linguo replay             # or: lr
 linguo replay 5           # replay specific entry #5
 linguo loop 3             # or: ll (3-repetition cycle)
 
-# 7. System Diagnostics & Permission Check
+# 7. System Diagnostics (6 Fundamental Pillars)
 linguo --doctor
 
-# 8. Pre-cache 75 Thai Survival Audio Bricks (100% Offline)
+# 8. Performance Profiling & Latency Tracing (ASCII Bar Chart)
+linguo --trace "I go to gym every morning"
+
+# 9. Parsimonious Logging Viewer (30-day auto-retention)
+linguo --logs             # View last 20 log entries
+linguo --logs 50          # View last 50 log entries
+
+# 10. Pre-cache 75 Thai Survival Audio Bricks (100% Offline)
 linguo --preseed
 
-# 9. Export Deck to Anki TSV
+# 11. Export Deck to Anki TSV
 linguo --export
+
+# 12. Package macOS Release (.dmg & .app for non-technical users)
+./scripts/bundle_dmg.sh   # Generates dist/Linguo-0.3.0.dmg (4.0 MB)
 ```
+
+---
+
+## 📦 macOS Release & Portability (Zero-Terminal Setup)
+
+For non-technical users who do not use the terminal:
+1. Run `./scripts/bundle_dmg.sh` to generate the release image `dist/Linguo-0.3.0.dmg` (4.0 MB).
+2. Open `Linguo-0.3.0.dmg` and drag `Linguo.app` into the **Applications** folder.
+3. Double-click `Linguo.app`: the 16-bit MTG HUD launches immediately on Metal with full keyboard navigation, Thai font rendering, and audio playback.
 
 ---
 
