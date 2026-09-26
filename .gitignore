@@ -35,3 +35,19 @@ dist/
 *.dmg
 *.app
 
+# Secrets & Security Gates
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+*.p12
+*.crt
+id_rsa
+id_ed25519
+credentials.json
+service_account*.json
+*.secret
+secrets/
+

@@ -2,6 +2,7 @@ use eframe::egui::{self, Color32, FontFamily, RichText, Stroke, Vec2};
 use rusqlite::{params, Connection};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,10 @@ struct LinguoGuiApp {
     is_pinned: bool,
     status_message: Option<(String, Instant)>,
     db_path: PathBuf,
+    input_phrase: String,
+    is_coaching: bool,
+    tx: Sender<(bool, String)>,
+    rx: Receiver<(bool, String)>,
 }
 
 impl LinguoGuiApp {
@@ -54,6 +59,7 @@ impl LinguoGuiApp {
         cc.egui_ctx.set_fonts(fonts);
 
         let db_path = get_db_path();
+        let (tx, rx) = channel();
         let mut app = Self {
             cards: Vec::new(),
             current_index: 0,
@@ -61,6 +67,10 @@ impl LinguoGuiApp {
             is_pinned: false,
             status_message: None,
             db_path,
+            input_phrase: String::new(),
+            is_coaching: false,
+            tx,
+            rx,
         };
         app.reload_cards();
         app
@@ -177,10 +187,59 @@ impl LinguoGuiApp {
             }
         }
     }
+
+    fn coach_phrase(&mut self) {
+        let phrase = self.input_phrase.trim().to_string();
+        if phrase.is_empty() {
+            self.set_status("⚠️ Scrivi una frase in inglese da verificare!");
+            return;
+        }
+        self.is_coaching = true;
+        self.set_status(format!("⚡ Linguo Coach sta analizzando: \"{}\"...", phrase));
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let bin_path = PathBuf::from(&home).join(".local/bin/linguo");
+            let cmd = if bin_path.exists() {
+                bin_path.to_string_lossy().to_string()
+            } else {
+                "linguo".to_string()
+            };
+            let res = Command::new(cmd).arg(&phrase).output();
+            match res {
+                Ok(output) => {
+                    if output.status.success() {
+                        let _ = tx.send((true, format!("✅ Analisi completata per: \"{}\"", phrase)));
+                    } else {
+                        let err = String::from_utf8_lossy(&output.stderr);
+                        let first_line = err.lines().next().unwrap_or("Errore");
+                        let _ = tx.send((false, format!("⚠️ Errore Coach: {}", first_line)));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send((false, format!("⚠️ Impossibile avviare il coach: {}", e)));
+                }
+            }
+        });
+    }
 }
 
 impl eframe::App for LinguoGuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Receive async coach responses
+        if let Ok((success, msg)) = self.rx.try_recv() {
+            self.is_coaching = false;
+            self.set_status(msg);
+            if success {
+                self.input_phrase.clear();
+                self.reload_cards();
+                self.current_index = 0;
+            }
+        }
+        if self.is_coaching {
+            ctx.request_repaint();
+        }
+
         // Global Keyboard Controls
         ctx.input(|i| {
             if i.key_pressed(egui::Key::Space) {
@@ -257,6 +316,32 @@ impl eframe::App for LinguoGuiApp {
 
 
                 ui.add_space(8.0);
+
+                // Practice & Live Coach Bar (Zero Terminal Required)
+                egui::Frame::group(ui.style())
+                    .fill(Color32::from_rgb(18, 24, 38))
+                    .stroke(Stroke::new(1.5, if self.is_coaching { gold } else { cyan }))
+                    .rounding(8.0)
+                    .inner_margin(10.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("💬").size(22.0));
+                            let edit_width = (ui.available_width() - 120.0).max(120.0);
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.input_phrase)
+                                    .hint_text("Scrivi o incolla una frase in inglese da verificare...")
+                                    .desired_width(edit_width)
+                            );
+                            let enter_hit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let btn_text = if self.is_coaching { "⏳ Analizzo..." } else { "⚡ Coach Me" };
+                            let btn_color = if self.is_coaching { gold } else { neon_green };
+                            if (ui.button(RichText::new(btn_text).color(btn_color).strong()).clicked() || enter_hit) && !self.is_coaching {
+                                self.coach_phrase();
+                            }
+                        });
+                    });
+
+                ui.add_space(10.0);
 
                 let total_visible = self.visible_cards().len();
 

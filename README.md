@@ -162,11 +162,21 @@ linguo --export
 ## 📦 macOS Release & Portability (Zero-Terminal Setup)
 
 For non-technical users who do not use the terminal:
-1. Run `./scripts/bundle_dmg.sh` to generate the release image `dist/Linguo-0.3.0.dmg` (4.0 MB).
+1. Download `Linguo-0.3.0.dmg` (4.0 MB) from [GitHub Releases](https://github.com/gptprojectmanager/linguo/releases).
 2. Open `Linguo-0.3.0.dmg` and drag `Linguo.app` into the **Applications** folder.
-3. Double-click `Linguo.app`: the 16-bit MTG HUD launches immediately on Metal with full keyboard navigation, Thai font rendering, and audio playback.
+3. **First Launch (macOS Gatekeeper)**:
+   - Click with **two fingers** (or right-click / Control-click) on `Linguo.app` in Applications.
+   - Select **Open (Apri)**, then click **Open (Apri comunque)** in the popup.
+   - macOS permanently authorizes the app. Subsequent launches require only a normal double-click.
+4. **Zero-Terminal Practice**:
+   - The HUD includes an integrated **Practice & Live Coach Bar** at the top: type or paste any English sentence and click `⚡ Coach Me` (or press Enter) to get instant correction, audio, and MTG cards!
 
 ---
+
+## 🛡️ Security & Secret Gates
+
+- **Pre-commit Secret Scanner**: `.git/hooks/pre-commit` and `scripts/check_secrets.sh` verify that no API keys (Google, OpenAI, GitHub tokens, private keys) are ever committed.
+- **CI Automated Verification**: GitHub Actions runs security audits on every push and release.
 
 ## 🧪 Automated Test Suite
 
