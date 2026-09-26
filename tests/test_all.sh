@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Linguo // Full Automated Test Suite
-# Tests Python engine, Pydantic schemas, SQLite WAL, CLI commands, and Rust HUD
+# Linguo // Unified Automated Test & Observability Suite
+# Tests Python engine, FastAPI server, Prometheus metrics, Pytest suite,
+# Rust dash-gui unit tests, Pydantic schemas, SQLite WAL, and macOS HUD
 # ==============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-echo "🧪 Starting Linguo Test Suite..."
+echo "🧪 Starting Linguo Unified Test Suite..."
 echo "📂 Project root: $SCRIPT_DIR"
 
 # 1. Python Syntax & Compilation
-echo -n "  [1/7] Python syntax validation... "
-python3 -m py_compile "$SCRIPT_DIR/bin/linguo"
+echo -n "  [1/10] Python syntax validation... "
+python3 -m py_compile "$SCRIPT_DIR/bin/linguo" "$SCRIPT_DIR/scripts/linguo_server.py"
 echo "✅ OK"
 
-# 2. Pydantic v2 Schema Import & Validation Test
-echo -n "  [2/7] Pydantic v2 schema integrity... "
+# 2. Pytest Unit Suite (Core, Gates, Config, Telemetry & Server Observability)
+echo "  [2/10] Pytest automated unit test suite (Core & Server)..."
+python3 -m pytest -q "$SCRIPT_DIR/tests"
+echo "  ✅ OK: All Pytest unit tests passed"
+
+# 3. Rust dash-gui Native Unit Tests
+echo "  [3/10] Rust dash-gui cargo test suite..."
+cargo test --manifest-path "$SCRIPT_DIR/gui/dash-gui/Cargo.toml" -q
+echo "  ✅ OK: All Cargo unit tests passed"
+
+# 4. Pydantic v2 Schema Import & Integrity Test
+echo -n "  [4/10] Pydantic v2 schema integrity... "
 python3 -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/bin')
@@ -27,13 +38,13 @@ assert int(pydantic.__version__.split('.')[0]) >= 2, 'Pydantic v2 required'
 "
 echo "✅ OK"
 
-# 3. System Diagnostics (linguo --doctor)
-echo -n "  [3/7] Running linguo doctor diagnostics... "
+# 5. System Diagnostics (linguo --doctor)
+echo -n "  [5/10] Running linguo doctor diagnostics... "
 linguo --doctor >/dev/null 2>&1
 echo "✅ OK"
 
-# 4. Database Schema & WAL Verification
-echo -n "  [4/7] SQLite WAL & tables check... "
+# 6. Database Schema & WAL Verification
+echo -n "  [6/10] SQLite WAL & tables check... "
 python3 -c "
 import sqlite3
 from pathlib import Path
@@ -52,33 +63,24 @@ with sqlite3.connect(db_path) as conn:
 "
 echo "✅ OK"
 
-# 5. British Council Audit & Card Minting
-echo -n "  [5/9] British Council audit engine... "
+# 7. British Council Audit & Card Minting
+echo -n "  [7/10] British Council audit engine... "
 linguo --audit --no-review >/dev/null 2>&1
 echo "✅ OK"
 
-# 6. Anki Export (linguo --export)
-echo -n "  [6/9] Anki TSV export generator... "
+# 8. Anki Export (linguo --export)
+echo -n "  [8/10] Anki TSV export generator... "
 linguo --export >/dev/null 2>&1
 export_tsv="$HOME/.local/share/linguo/cards_anki_export.tsv"
 test -f "$export_tsv"
 echo "✅ OK"
 
-# 7. Rust dash-gui Native HUD Binary
-echo -n "  [7/9] Rust dash-gui Metal binary check... "
-gui_bin="$HOME/.local/bin/linguo-gui"
-test -x "$gui_bin"
-echo "✅ OK"
-
-# 8. Gate 2 Content Moderation & SENSITIVE_NO_CARD
-echo -n "  [8/9] Gate 2 Safety & Moderation filter... "
+# 9. Gate 2 Content Moderation & SENSITIVE_NO_CARD
+echo -n "  [9/10] Gate 2 Safety & Moderation filter... "
 python3 -c "
-import importlib.machinery
-import importlib.util
-loader = importlib.machinery.SourceFileLoader('linguo', '$SCRIPT_DIR/bin/linguo')
-spec = importlib.util.spec_from_loader('linguo', loader)
-linguo = importlib.util.module_from_spec(spec)
-loader.exec_module(linguo)
+import sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from bin import linguo
 
 assert linguo.detect_sensitive_content('I want to buy a gun') == True
 assert linguo.detect_sensitive_content('We should merg the PR') == False
@@ -87,10 +89,10 @@ assert res['error_category'] == 'SENSITIVE_NO_CARD', f'Expected SENSITIVE_NO_CAR
 "
 echo "✅ OK"
 
-# 9. macOS LaunchAgent Menu Bar Agent
-echo -n "  [9/9] macOS Menu Bar LaunchAgent agent... "
+# 10. macOS LaunchAgent Menu Bar Agent
+echo -n "  [10/10] macOS Menu Bar LaunchAgent agent... "
 linguo --status-bar >/dev/null 2>&1
 echo "✅ OK"
 
 echo ""
-echo "🎉 ALL 9 TESTS PASSED! Linguo is 100% verified and operational."
+echo "🎉 ALL 10 TESTS PASSED! Linguo Core, API Server, and Native HUD are verified and operational."

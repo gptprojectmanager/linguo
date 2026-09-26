@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Linguo Remote Coach API Server (FastAPI + AGY on Dell 7670)
-Exposes /coach and /health endpoints with Bearer token authentication
-for zero-terminal remote clients (macOS dash-gui in Portugal).
+Exposes /coach, /audit, /health, and /metrics endpoints with Bearer token authentication,
+W3C distributed trace propagation, structured JSON telemetry, and Prometheus exposition
+for institutional monitoring with Dell monitoring-stack (Prometheus, Loki, Tempo, Grafana).
 """
 
 import os
@@ -10,12 +11,41 @@ import re
 import sys
 import json
 import time
+import uuid
+import shutil
 import subprocess
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional
-from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi import FastAPI, Header, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 from pydantic import BaseModel, Field
+
+# Prometheus Metrics Instrumentation
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+
+if PROMETHEUS_AVAILABLE:
+    REQ_COUNT = Counter("linguo_requests_total", "Total incoming HTTP requests", ["endpoint", "method", "status"])
+    REQ_LATENCY = Histogram(
+        "linguo_request_duration_seconds",
+        "Total request duration in seconds",
+        ["endpoint", "method"],
+        buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+    )
+    INFERENCE_LATENCY = Histogram(
+        "linguo_inference_duration_seconds",
+        "AGY backend inference duration in seconds",
+        ["endpoint", "model"],
+        buckets=[0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 45.0]
+    )
+    ACTIVE_REQUESTS = Gauge("linguo_active_requests", "Current active in-flight requests")
+    GATE_TRIGGERS = Counter("linguo_gate_triggers_total", "Gate triggers count", ["gate", "status"])
+    ESTIMATED_TOKENS = Counter("linguo_tokens_estimated_total", "Estimated tokens processed", ["model", "type"])
 
 # Security Token (default fallback or environment)
 API_SECRET_TOKEN = os.environ.get("LINGUO_API_TOKEN", "linguo-secret-key-2026-linguo-coach")
@@ -46,8 +76,8 @@ def detect_sensitive_content(text: str) -> bool:
 
 app = FastAPI(
     title="Linguo Remote Coach API",
-    version="0.3.1",
-    description="AI English & Thai Language Acquisition Backend on Dell 7670 with 3-Gate Pedagogical Review"
+    version="0.3.3",
+    description="AI English & Thai Language Acquisition Backend on Dell 7670 with 3-Gate Pedagogical Review and Institutional Observability"
 )
 
 # CORS middleware to allow cross-origin requests from GUI clients
@@ -58,6 +88,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def telemetry_and_tracing_middleware(request: Request, call_next):
+    trace_id = request.headers.get("X-Trace-Id") or request.headers.get("traceparent")
+    if not trace_id:
+        trace_id = f"trc-{uuid.uuid4().hex[:12]}"
+
+    if PROMETHEUS_AVAILABLE:
+        ACTIVE_REQUESTS.inc()
+
+    t0 = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception as exc:
+        status_code = 500
+        raise exc
+    finally:
+        dt_sec = time.perf_counter() - t0
+        dt_ms = round(dt_sec * 1000.0, 2)
+
+        if PROMETHEUS_AVAILABLE:
+            ACTIVE_REQUESTS.dec()
+            REQ_COUNT.labels(endpoint=request.url.path, method=request.method, status=str(status_code)).inc()
+            REQ_LATENCY.labels(endpoint=request.url.path, method=request.method).observe(dt_sec)
+
+        # Structured JSON Log output (Ingested by Vector / Promtail / Loki journald)
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "ERROR" if status_code >= 500 else ("WARN" if status_code >= 400 else "INFO"),
+            "service": "linguo-server",
+            "trace_id": trace_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": status_code,
+            "duration_ms": dt_ms,
+            "client_ip": request.client.host if request.client else "unknown"
+        }
+        print(json.dumps(log_entry), flush=True)
+
+    response.headers["X-Trace-Id"] = trace_id
+    return response
 
 class CoachRequest(BaseModel):
     phrase: str = Field(..., min_length=1, description="English phrase to analyze")
@@ -130,15 +203,56 @@ def clean_json_text(raw: str) -> str:
         return cleaned[first_brace:last_brace+1].strip()
     return cleaned
 
+@app.get("/metrics")
+def metrics_exposition():
+    """Standard Prometheus Exposition format endpoint for Prometheus scraping."""
+    if not PROMETHEUS_AVAILABLE:
+        raise HTTPException(status_code=501, detail="prometheus_client not available")
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 @app.get("/health")
-def health_check():
+@app.get("/health/live")
+def health_liveness():
+    """Liveness probe: returns 200 if service process is responding."""
     return {
         "status": "ok",
         "service": "linguo-remote-backend",
         "host": "sam7670",
         "engine": "gemini-3.6-flash-low",
-        "agent": "linguo-fast"
+        "agent": "linguo-fast",
+        "version": "0.3.3"
     }
+
+@app.get("/health/ready")
+def health_readiness():
+    """Readiness probe: validates backend tooling, workspace filesystem, and model runtime."""
+    agy_bin = Path.home() / ".local" / "bin" / "agy"
+    agy_present = agy_bin.exists() or shutil.which("agy") is not None
+
+    workspace = Path.home() / ".local" / "share" / "linguo" / "workspace"
+    workspace_writable = False
+    try:
+        workspace.mkdir(parents=True, exist_ok=True)
+        probe = workspace / ".readiness_probe"
+        probe.write_text("probe")
+        probe.unlink(missing_ok=True)
+        workspace_writable = True
+    except Exception:
+        workspace_writable = False
+
+    is_ready = agy_present and workspace_writable
+    payload = {
+        "status": "ready" if is_ready else "degraded",
+        "checks": {
+            "agy_binary": agy_present,
+            "workspace_writable": workspace_writable
+        },
+        "engine": "gemini-3.6-flash-low",
+        "audit_engine": "gemini-3.8-flash-high"
+    }
+    if not is_ready:
+        raise HTTPException(status_code=503, detail=payload)
+    return payload
 
 @app.post("/coach", response_model=CoachResponse)
 def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token)):
@@ -166,6 +280,7 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
     ]
 
     try:
+        t_infer = time.perf_counter()
         res = subprocess.run(
             cmd,
             cwd=str(workspace),
@@ -174,6 +289,11 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
             timeout=30.0,
             check=True
         )
+        infer_duration = time.perf_counter() - t_infer
+        if PROMETHEUS_AVAILABLE:
+            INFERENCE_LATENCY.labels(endpoint="/coach", model="gemini-3.6-flash-low").observe(infer_duration)
+            ESTIMATED_TOKENS.labels(model="gemini-3.6-flash-low", type="input").inc(max(1, len(phrase.split()) * 2))
+
         outer = json.loads(res.stdout)
         raw_response = outer.get("response", "").strip()
         cleaned = clean_json_text(raw_response)
@@ -192,6 +312,8 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
     raw_to_check = f"{phrase} {parsed.get('transcribed_english', '')} {parsed.get('corrected_english', '')}"
     if detect_sensitive_content(raw_to_check):
         category = "SENSITIVE_NO_CARD"
+        if PROMETHEUS_AVAILABLE:
+            GATE_TRIGGERS.labels(gate="gate2_sensitive", status="blocked").inc()
 
     analysis = AnalysisData(
         transcribed_english=parsed.get("transcribed_english", phrase),
@@ -267,7 +389,13 @@ Output MUST be a single valid JSON object only with exactly these keys:
     ]
 
     try:
+        t_infer = time.perf_counter()
         res = subprocess.run(cmd, cwd=str(workspace), capture_output=True, text=True, timeout=35.0, check=True)
+        infer_duration = time.perf_counter() - t_infer
+        if PROMETHEUS_AVAILABLE:
+            INFERENCE_LATENCY.labels(endpoint="/audit", model="gemini-3.8-flash-high").observe(infer_duration)
+            ESTIMATED_TOKENS.labels(model="gemini-3.8-flash-high", type="input").inc(500)
+
         outer = json.loads(res.stdout)
         raw = outer.get("response", "").strip()
         cleaned = clean_json_text(raw)

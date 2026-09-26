@@ -217,9 +217,16 @@ LOGS_DIR = DATA_DIR / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+_LAST_LOG_CLEANUP = 0.0
+
+
 def rotate_and_cleanup_logs(max_days: int = 30):
     """Parsimonious log retention: purges daily log files older than max_days (30 days)."""
+    global _LAST_LOG_CLEANUP
     now = time.time()
+    if now - _LAST_LOG_CLEANUP < 3600:
+        return
+    _LAST_LOG_CLEANUP = now
     cutoff = now - (max_days * 86400)
     for f in LOGS_DIR.glob("linguo_*.log"):
         try:
@@ -230,15 +237,28 @@ def rotate_and_cleanup_logs(max_days: int = 30):
 
 
 def log_event(level: str, component: str, message: str, meta: dict | None = None):
-    """Appends structured log to daily rotating file with timestamp, level, component, and metadata."""
+    """Appends structured log to daily rotating file and emits NDJSON for Vector/Loki ingestion."""
     try:
         rotate_and_cleanup_logs(30)
-        today = datetime.now().strftime("%Y-%m-%d")
+        now_dt = datetime.now()
+        today = now_dt.strftime("%Y-%m-%d")
         log_file = LOGS_DIR / f"linguo_{today}.log"
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        jsonl_file = LOGS_DIR / "linguo_events.jsonl"
+        ts = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         meta_str = f" | {json.dumps(meta, ensure_ascii=False)}" if meta else ""
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"[{ts}] [{level.upper()}] [{component}] {message}{meta_str}\n")
+
+        # Emit single-line NDJSON for enterprise log aggregation (Vector / Loki / Promtail)
+        json_entry = {
+            "timestamp": now_dt.isoformat(),
+            "level": level.upper(),
+            "component": component,
+            "message": message,
+            "meta": meta or {}
+        }
+        with open(jsonl_file, "a", encoding="utf-8") as f_json:
+            f_json.write(json.dumps(json_entry, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
@@ -622,9 +642,75 @@ def get_running_recorder_pid() -> int | None:
         return None
 
 
+def resolve_remote_endpoint(dispatch_mode: str) -> Optional[tuple[str, str]]:
+    """Resolves Dell 7670 remote endpoint according to 3-tier cascade (WireGuard -> Cloudflare -> Local)."""
+    if dispatch_mode == "local":
+        return None
+
+    token = os.environ.get("LINGUO_API_TOKEN", "linguo-secret-key-2026-linguo-coach")
+    custom_url = os.environ.get("LINGUO_REMOTE_URL")
+    if custom_url and custom_url.strip():
+        return (custom_url.strip(), token)
+
+    import urllib.request
+    # 1. Tier 1: Check Dell internal WireGuard / LAN IP (fastest, direct VPN from Sam's Mac)
+    try:
+        req = urllib.request.Request("http://10.0.0.2:8765/health", headers={"User-Agent": "Linguo-CLI"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            if resp.status == 200:
+                return ("http://10.0.0.2:8765", token)
+    except Exception:
+        pass
+
+    # 2. Tier 2: Check Cloudflare Tunnel Public Subdomain (works anywhere in the world, e.g. Portugal)
+    try:
+        req = urllib.request.Request("https://linguo.princyx.xyz/health", headers={"User-Agent": "Linguo-CLI"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status == 200:
+                return ("https://linguo.princyx.xyz", token)
+    except Exception:
+        pass
+
+    if dispatch_mode == "dell":
+        return ("https://linguo.princyx.xyz", token)
+
+    return None
+
+
 def call_agy_coach(text: str) -> dict:
-    """Invokes agy with minimal agent profile (linguo-fast, 0 tools) in isolated workspace."""
+    """Invokes coach engine via remote Dell server (if configured/available) or local agy CLI."""
     cfg = load_config()
+    dispatch_mode = cfg.get("dispatch_mode", "auto")
+    remote_info = resolve_remote_endpoint(dispatch_mode)
+
+    if remote_info:
+        base_url, token = remote_info
+        import urllib.request
+        import uuid
+        coach_url = f"{base_url.rstrip('/')}/coach"
+        payload = json.dumps({"phrase": text, "mode": "fast"}).encode("utf-8")
+        trace_id = f"trc-cli-{uuid.uuid4().hex[:12]}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "X-Trace-Id": trace_id
+        }
+        try:
+            req = urllib.request.Request(coach_url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
+                if resp.status == 200:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    ana = resp_data.get("analysis", {})
+                    log_event("INFO", "REMOTE_COACH", f"Remote analysis succeeded via {base_url}", {
+                        "timing_ms": resp_data.get("timing_ms"),
+                        "trace_id": trace_id
+                    })
+                    return parse_and_validate_analysis(json.dumps(ana), fallback_input=text)
+        except Exception as e:
+            log_event("WARN", "REMOTE_FALLBACK", f"Remote coach request failed ({e}); falling back to local AGY", {
+                "trace_id": trace_id
+            })
+
     model = cfg.get("model", "gemini-3.6-flash-low")
     prompt = f'Analyze: """{text}"""'
 

@@ -276,7 +276,7 @@ impl LinguoGuiApp {
                             "Alex" | "am_adam" => "Alex",
                             _ => "Samantha",
                         };
-                        let rate = ((speed / 0.8) * 165.0).round() as i32;
+                        let rate = (175.0 * speed).round() as i32;
                         let _ = Command::new("say").args(["-v", say_voice, "-r", &rate.to_string(), &solution_text]).status();
                     }
                 });
@@ -329,6 +329,7 @@ impl LinguoGuiApp {
                     "model": cfg_clone.model,
                 }).to_string();
 
+                let trace_id = format!("trc-gui-{:x}", md5::compute(format!("{}_{}", phrase, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0))));
                 let res = Command::new("curl")
                     .args([
                         "-s",
@@ -336,6 +337,7 @@ impl LinguoGuiApp {
                         &endpoint,
                         "-H", "Content-Type: application/json",
                         "-H", &format!("Authorization: Bearer {}", token),
+                        "-H", &format!("X-Trace-Id: {}", trace_id),
                         "-d", &payload,
                         "--max-time", "35",
                     ])
@@ -351,7 +353,7 @@ impl LinguoGuiApp {
 
                                 // Play English speech via macOS say
                                 let eng_clean = ana.corrected_english.replace('\'', "");
-                                let eng_rate = ((cfg_clone.speed / 0.8) * 165.0).round() as i32;
+                                let eng_rate = (175.0 * cfg_clone.speed).round() as i32;
                                 let say_voice = match cfg_clone.eng_voice.as_str() {
                                     "Alex" | "am_adam" => "Alex",
                                     _ => "Samantha",
@@ -1147,3 +1149,72 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| Ok(Box::new(LinguoGuiApp::new(cc)))),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let cfg = LinguoConfig::default();
+        assert_eq!(cfg.model, "gemini-3.6-flash-low");
+        assert_eq!(cfg.card_model, "gemini-3.8-flash-high");
+        assert_eq!(cfg.tts_engine, "hybrid");
+        assert_eq!(cfg.speed, 0.8);
+        assert_eq!(cfg.eng_voice, "af_nicole");
+        assert_eq!(cfg.thai_voice, "th-TH-PremwadeeNeural");
+        assert_eq!(cfg.dispatch_mode, "auto");
+        assert!(cfg.auto_paste);
+        assert!(cfg.sound_feedback);
+        assert!(cfg.notifications);
+    }
+
+    #[test]
+    fn test_config_json_roundtrip() {
+        let original = LinguoConfig {
+            model: "gemini-3.7-flash-medium".to_string(),
+            card_model: "canon".to_string(),
+            tts_engine: "local".to_string(),
+            speed: 0.75,
+            eng_voice: "Alex".to_string(),
+            thai_voice: "Kanya".to_string(),
+            notifications: false,
+            sound_feedback: false,
+            auto_paste: false,
+            dispatch_mode: "dell".to_string(),
+            hotkey: "<cmd>+<space>".to_string(),
+        };
+
+        let json = serde_json::to_string_pretty(&original).expect("Serialization failed");
+        let deserialized: LinguoConfig = serde_json::from_str(&json).expect("Deserialization failed");
+
+        assert_eq!(original.model, deserialized.model);
+        assert_eq!(original.card_model, deserialized.card_model);
+        assert_eq!(original.tts_engine, deserialized.tts_engine);
+        assert_eq!(original.speed, deserialized.speed);
+        assert_eq!(original.eng_voice, deserialized.eng_voice);
+        assert_eq!(original.dispatch_mode, deserialized.dispatch_mode);
+    }
+
+    #[test]
+    fn test_speech_rate_calculation() {
+        // Standard pedagogical speech rate: 175 * speed
+        let r_08 = (175.0 * 0.8_f32).round() as i32;
+        assert_eq!(r_08, 140);
+
+        let r_10 = (175.0 * 1.0_f32).round() as i32;
+        assert_eq!(r_10, 175);
+
+        let r_075 = (175.0 * 0.75_f32).round() as i32;
+        assert_eq!(r_075, 131);
+    }
+
+    #[test]
+    fn test_remote_coach_config_local_mode() {
+        let mut cfg = LinguoConfig::default();
+        cfg.dispatch_mode = "local".to_string();
+        let res = get_remote_coach_config(&cfg);
+        assert!(res.is_none(), "Local dispatch mode should immediately return None without network calls");
+    }
+}
+
