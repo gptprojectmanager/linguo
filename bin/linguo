@@ -548,7 +548,7 @@ def run_worker(record_id: int):
         if tts_engine in ("hybrid", "kokoro"):
             try:
                 import torch
-                torch.set_num_threads(1)  # Strictly 1 CPU core to keep Mac responsive and quiet
+                torch.set_num_threads(2)  # Dedicated 2 CPU cores for high performance & quiet operation
                 from kokoro import KPipeline
                 import soundfile as sf
                 import numpy as np

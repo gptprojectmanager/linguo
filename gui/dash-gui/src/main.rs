@@ -707,26 +707,53 @@ fn set_card_mastered_in_db(db_path: &Path, card_id: i64, mastered: bool) -> Resu
 }
 
 fn get_remote_coach_config() -> Option<(String, String)> {
+    let token = std::env::var("LINGUO_API_TOKEN")
+        .unwrap_or_else(|_| "linguo-secret-key-2026-linguo-coach".to_string());
+
+    // 1. Explicit override if set
     if let Ok(url) = std::env::var("LINGUO_REMOTE_URL") {
         if !url.trim().is_empty() {
-            let token = std::env::var("LINGUO_API_TOKEN")
-                .unwrap_or_else(|_| "linguo-secret-key-2026-linguo-coach".to_string());
             return Some((url.trim().to_string(), token));
         }
     }
+
+    // 2. Tier 1: Check Dell internal WireGuard / LAN IP (fastest, direct VPN from Sam's Mac)
+    let wg_check = Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "1", "http://10.0.0.2:8765/health"])
+        .output();
+    if let Ok(out) = wg_check {
+        let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if code == "200" {
+            return Some(("http://10.0.0.2:8765".to_string(), token));
+        }
+    }
+
+    // 3. Tier 2: Check Cloudflare Tunnel Public Subdomain (works anywhere in the world, e.g. Portugal)
+    let cf_check = Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "2", "https://linguo.princyx.xyz/health"])
+        .output();
+    if let Ok(out) = cf_check {
+        let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if code == "200" {
+            return Some(("https://linguo.princyx.xyz".to_string(), token));
+        }
+    }
+
+    // 4. Config file check
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let cfg_path = PathBuf::from(home).join(".local/share/linguo/config.json");
     if let Ok(content) = std::fs::read_to_string(cfg_path) {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(url) = val.get("remote_url").and_then(|u| u.as_str()) {
                 if !url.trim().is_empty() {
-                    let token = val.get("auth_token").and_then(|t| t.as_str())
-                        .unwrap_or("linguo-secret-key-2026-linguo-coach");
-                    return Some((url.trim().to_string(), token.to_string()));
+                    let t = val.get("auth_token").and_then(|x| x.as_str()).unwrap_or(&token);
+                    return Some((url.trim().to_string(), t.to_string()));
                 }
             }
         }
     }
+
+    // 5. Tier 3: None found -> falls back to local linguo CLI!
     None
 }
 
