@@ -10,7 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
 APP_NAME="Linguo"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-DMG_PATH="$DIST_DIR/$APP_NAME-0.3.0.dmg"
+VERSION=$(grep -m1 '^version =' "$SCRIPT_DIR/pyproject.toml" | cut -d'"' -f2)
+DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -50,9 +51,9 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>0.3.0</string>
+    <string>$VERSION</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>

@@ -1,6 +1,6 @@
 [project]
 name = "linguo"
-version = "0.3.2"
+version = "0.3.3"
 description = "Dual English-Thai Voice & Language Coach with 16-bit MTG Arcade HUD, ADHD Spaced Repetition, Kokoro-82M offline TTS and Edge-TTS"
 readme = "README.md"
 requires-python = ">=3.10"

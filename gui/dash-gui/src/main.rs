@@ -1,10 +1,87 @@
 use eframe::egui::{self, Color32, FontFamily, RichText, Stroke, Vec2};
 use rusqlite::{params, Connection};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LinguoConfig {
+    #[serde(default = "default_model")]
+    pub model: String,
+    #[serde(default = "default_tts_engine")]
+    pub tts_engine: String,
+    #[serde(default = "default_speed")]
+    pub speed: f32,
+    #[serde(default = "default_eng_voice")]
+    pub eng_voice: String,
+    #[serde(default = "default_thai_voice")]
+    pub thai_voice: String,
+    #[serde(default = "default_true")]
+    pub auto_paste: bool,
+    #[serde(default = "default_true")]
+    pub sound_feedback: bool,
+    #[serde(default = "default_true")]
+    pub notifications: bool,
+    #[serde(default = "default_dispatch")]
+    pub dispatch_mode: String,
+    #[serde(default = "default_hotkey")]
+    pub hotkey: String,
+}
+
+fn default_model() -> String { "gemini-3.6-flash-low".to_string() }
+fn default_tts_engine() -> String { "hybrid".to_string() }
+fn default_speed() -> f32 { 0.8 }
+fn default_eng_voice() -> String { "af_nicole".to_string() }
+fn default_thai_voice() -> String { "th-TH-PremwadeeNeural".to_string() }
+fn default_true() -> bool { true }
+fn default_dispatch() -> String { "auto".to_string() }
+fn default_hotkey() -> String { "<ctrl>+<alt>+<space>".to_string() }
+
+impl Default for LinguoConfig {
+    fn default() -> Self {
+        Self {
+            model: default_model(),
+            tts_engine: default_tts_engine(),
+            speed: default_speed(),
+            eng_voice: default_eng_voice(),
+            thai_voice: default_thai_voice(),
+            auto_paste: default_true(),
+            sound_feedback: default_true(),
+            notifications: default_true(),
+            dispatch_mode: default_dispatch(),
+            hotkey: default_hotkey(),
+        }
+    }
+}
+
+fn get_config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".local/share/linguo/config.json")
+}
+
+fn load_config_from_file() -> LinguoConfig {
+    let path = get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(cfg) = serde_json::from_str::<LinguoConfig>(&content) {
+            return cfg;
+        }
+    }
+    let def = LinguoConfig::default();
+    save_config_to_file(&def);
+    def
+}
+
+fn save_config_to_file(cfg: &LinguoConfig) {
+    let path = get_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json_str) = serde_json::to_string_pretty(cfg) {
+        let _ = std::fs::write(&path, json_str);
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -64,6 +141,8 @@ struct LinguoGuiApp {
     is_coaching: bool,
     tx: Sender<(bool, String)>,
     rx: Receiver<(bool, String)>,
+    config: LinguoConfig,
+    show_config_modal: bool,
 }
 
 impl LinguoGuiApp {
@@ -97,6 +176,8 @@ impl LinguoGuiApp {
             is_coaching: false,
             tx,
             rx,
+            config: load_config_from_file(),
+            show_config_modal: false,
         };
         app.reload_cards();
         app
@@ -224,15 +305,17 @@ impl LinguoGuiApp {
         self.set_status(format!("⚡ Linguo Coach sta analizzando: \"{}\"...", phrase));
         let tx = self.tx.clone();
         let db_path = self.db_path.clone();
+        let cfg_clone = self.config.clone();
 
         std::thread::spawn(move || {
-            let remote_cfg = get_remote_coach_config();
+            let remote_cfg = get_remote_coach_config(&cfg_clone);
             if let Some((url, token)) = remote_cfg {
                 // 1. REMOTE COACH MODE (Via Dell 7670 / Cloudflare Tunnel)
                 let endpoint = format!("{}/coach", url.trim_end_matches('/'));
                 let payload = serde_json::json!({
                     "phrase": phrase,
-                    "mode": "fast"
+                    "mode": "fast",
+                    "model": cfg_clone.model,
                 }).to_string();
 
                 let res = Command::new("curl")
@@ -257,17 +340,19 @@ impl LinguoGuiApp {
 
                                 // Play English speech via macOS say
                                 let eng_clean = ana.corrected_english.replace('\'', "");
+                                let eng_rate = ((cfg_clone.speed / 0.8) * 165.0).round() as i32;
                                 let _ = Command::new("say")
-                                    .args(["-v", "Samantha", "-r", "165", &eng_clean])
+                                    .args(["-v", "Samantha", "-r", &eng_rate.to_string(), &eng_clean])
                                     .spawn();
 
                                 // Play Thai speech via macOS say
                                 if let Some(ref thai) = ana.thai_concise_script {
                                     let thai_clean = thai.clone();
+                                    let thai_rate = ((cfg_clone.speed / 0.8) * 150.0).round() as i32;
                                     std::thread::spawn(move || {
                                         std::thread::sleep(Duration::from_millis(600));
                                         let _ = Command::new("say")
-                                            .args(["-v", "Kanya", "-r", "150", &thai_clean])
+                                            .args(["-v", "Kanya", "-r", &thai_rate.to_string(), &thai_clean])
                                             .status();
                                     });
                                 }
@@ -366,6 +451,9 @@ impl eframe::App for LinguoGuiApp {
                 let status = if self.is_pinned { "📌 Window pinned always-on-top" } else { "📍 Window unpinned" };
                 self.set_status(status);
             }
+            if i.key_pressed(egui::Key::C) {
+                self.show_config_modal = !self.show_config_modal;
+            }
             if i.key_pressed(egui::Key::F5) {
                 self.reload_cards();
             }
@@ -395,6 +483,10 @@ impl eframe::App for LinguoGuiApp {
                         }
                         if ui.button("🔄 Reload").clicked() {
                             self.reload_cards();
+                        }
+                        let cfg_color = if self.show_config_modal { gold } else { Color32::WHITE };
+                        if ui.button(RichText::new("⚙️ Config (C)").color(cfg_color)).clicked() {
+                            self.show_config_modal = !self.show_config_modal;
                         }
                         if ui.checkbox(&mut self.show_mastered, "Show Mastered").changed() {
                             self.current_index = 0;
@@ -645,6 +737,112 @@ impl eframe::App for LinguoGuiApp {
                     }
                 }
             });
+
+        // Config Modal Window
+        if self.show_config_modal {
+            let mut is_open = self.show_config_modal;
+            let mut close_requested = false;
+            let mut changed = false;
+            let modal_gold = Color32::from_rgb(218, 165, 32);
+            let modal_cyan = Color32::from_rgb(0, 229, 255);
+            let modal_green = Color32::from_rgb(74, 222, 128);
+
+            egui::Window::new(RichText::new("⚙️ Linguo Settings & Configuration Matrix").color(modal_gold).strong())
+                .open(&mut is_open)
+                .resizable(false)
+                .collapsible(false)
+                .default_width(480.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Matrice Parametri Operativi (2-3 Opzioni Discrete per Dominio)").color(Color32::LIGHT_GRAY).italics());
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    // 1. LLM Model Tier
+                    ui.label(RichText::new("1. LLM Inference Model (Gemini / AGY)").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.6-flash-low".to_string(), "⚡ Eco Fast (Flash 3.6)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced (Flash 3.7)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "🧠 Deep Pro (Flash 3.8)").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 2. Audio Speech Engine
+                    ui.label(RichText::new("2. Speech Engine (TTS Synthesis)").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "hybrid".to_string(), "✨ Hybrid Studio (Kokoro+Edge)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "local".to_string(), "🔊 100% Offline (macOS Say)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "edge".to_string(), "☁️ Azure Cloud (Edge-TTS)").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 3. Playback Speed
+                    ui.label(RichText::new("3. Playback Speed (Didattica & Articolazione)").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.speed, 0.75, "0.75x Lenta").clicked();
+                        changed |= ui.selectable_value(&mut self.config.speed, 0.80, "0.80x Didattica (Default)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.speed, 1.00, "1.00x Naturale").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 4. Voice Persona
+                    ui.label(RichText::new("4. English Voice Persona").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.eng_voice, "af_nicole".to_string(), "Nicole (British Velvety)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.eng_voice, "af_bella".to_string(), "Bella (American Crisp)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.eng_voice, "Samantha".to_string(), "Samantha (macOS System)").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 5. Network Routing Dispatch
+                    ui.label(RichText::new("5. Network Routing Dispatch").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "auto".to_string(), "🌐 Auto Cascade (WG->CF->Mac)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "dell".to_string(), "🖥️ Dell Remote (Force Server)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "local".to_string(), "💻 Local Mac (Force Local)").clicked();
+                    });
+                    ui.add_space(8.0);
+
+                    // 6. Automation & Feedback Toggles
+                    ui.label(RichText::new("6. Automazioni & Notifiche Client").color(modal_cyan).strong());
+                    ui.horizontal(|ui| {
+                        changed |= ui.checkbox(&mut self.config.auto_paste, "Auto-Paste (Cmd+V)").changed();
+                        changed |= ui.checkbox(&mut self.config.sound_feedback, "Audio Feedback").changed();
+                        changed |= ui.checkbox(&mut self.config.notifications, "Notifiche Desktop").changed();
+                    });
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("🔄 Ripristina Predefiniti").color(Color32::LIGHT_RED)).clicked() {
+                            self.config = LinguoConfig::default();
+                            save_config_to_file(&self.config);
+                            self.set_status("Parametri ripristinati ai valori predefiniti");
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("Chiudi").color(modal_gold).strong()).clicked() {
+                                close_requested = true;
+                            }
+                            if ui.button(RichText::new("💾 Salva").color(modal_green)).clicked() {
+                                save_config_to_file(&self.config);
+                                self.set_status("Configurazione salvata con successo");
+                                close_requested = true;
+                            }
+                        });
+                    });
+
+                    if changed {
+                        save_config_to_file(&self.config);
+                        self.set_status("Configurazione aggiornata e salvata");
+                    }
+                });
+            if close_requested {
+                is_open = false;
+            }
+            self.show_config_modal = is_open;
+        }
     }
 }
 
@@ -706,7 +904,11 @@ fn set_card_mastered_in_db(db_path: &Path, card_id: i64, mastered: bool) -> Resu
     Ok(())
 }
 
-fn get_remote_coach_config() -> Option<(String, String)> {
+fn get_remote_coach_config(cfg: &LinguoConfig) -> Option<(String, String)> {
+    if cfg.dispatch_mode == "local" {
+        return None;
+    }
+
     let token = std::env::var("LINGUO_API_TOKEN")
         .unwrap_or_else(|_| "linguo-secret-key-2026-linguo-coach".to_string());
 
@@ -751,6 +953,11 @@ fn get_remote_coach_config() -> Option<(String, String)> {
                 }
             }
         }
+    }
+
+    // If dispatch_mode is explicitly forced to "dell", return Dell tunnel URL even if health probe timed out
+    if cfg.dispatch_mode == "dell" {
+        return Some(("https://linguo.princyx.xyz".to_string(), token));
     }
 
     // 5. Tier 3: None found -> falls back to local linguo CLI!

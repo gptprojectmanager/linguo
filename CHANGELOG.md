@@ -4,6 +4,27 @@ All notable changes to **Linguo** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-09-26
+
+### ⚙️ Interactive Configuration Matrix (GUI & CLI)
+- **Settings & Configuration Modal (`⚙️ Config` / `[C]`)**:
+  - Interactive configuration matrix in `dash-gui` with 2–3 discrete options for each operational domain:
+    1. **LLM Model Tier**: `gemini-3.6-flash-low` (Eco Fast, default), `gemini-3.7-flash-medium` (Balanced), `gemini-3.8-flash-high` (Deep Pro).
+    2. **TTS Speech Engine**: `hybrid` (Kokoro + Edge-TTS, default), `local` (macOS offline Say), `edge` (Azure Cloud).
+    3. **Playback Speed**: `0.75x` (Lenta), `0.80x` (Didattica, default), `1.00x` (Naturale).
+    4. **English Voice Persona**: `af_nicole` (British Velvety, default), `af_bella` (American Crisp), `Samantha` (macOS System).
+    5. **Network Routing Dispatch**: `auto` (Cascade: WireGuard -> Cloudflare -> Local Mac, default), `dell` (Force Server), `local` (Force Mac).
+    6. **Client Automation Toggles**: `auto_paste` (Cmd+V), `sound_feedback`, `notifications`.
+  - Immediate atomic persistence to `~/.local/share/linguo/config.json`.
+  - Factory reset button ("Ripristina Predefiniti") restoring defaults across all parameters.
+- **Unified CLI Configuration Engine (`linguo config`)**:
+  - Terminal matrix inspection: `linguo config`.
+  - Subcommands: `linguo config model <fast|balanced|pro>`, `linguo config speed <0.75|0.8|1.0>`, `linguo config route <auto|dell|local>`, `linguo config reset`.
+- **Menu Bar Context Menu Integration**:
+  - Added "⚙️ Impostazioni Config..." item to the right-click menu of the 🎙️ menu bar accessory.
+
+---
+
 ## [0.3.2] - 2026-09-26
 
 ### 🎙️ macOS Menu Bar LaunchAgent & 3-Gate Quality Pipeline

@@ -321,7 +321,7 @@ flowchart TD
 * **Technology**: Rust 2021, `eframe` (egui 0.28) utilizing the macOS **Metal** graphics backend.
 * **Performance Profile**: 60 frames per second, 0.0% CPU at idle, ~15 MB resident memory.
 * **Typography**: Integrated Apple TrueType font `/System/Library/Fonts/Supplemental/Ayuthaya.ttf` for native Thai glyph rendering.
-* **Window Features**: Always-on-Top floating pinning (`[P]`), interactive live coaching search bar, and full keyboard navigation.
+* **Window Features**: Always-on-Top floating pinning (`[P]`), interactive live coaching search bar, interactive Configuration Matrix modal (`⚙️ Config` / `[C]`), and full keyboard navigation.
 
 ### 8.2 macOS Menu Bar Accessory
 * **Technology**: PyObjC Cocoa (`NSStatusBar`, `NSStatusItem`).
@@ -386,6 +386,15 @@ linguo --audit --no-review       # Execute rapid audit without LLM escalation
 # User Interfaces
 linguo --gui                     # Launch native Rust Metal HUD (dash-gui)
 linguo --board                   # Open curses terminal board (lb)
+
+# Operational Configuration Matrix
+linguo config                    # Display full operational matrix table
+linguo config model <fast|balanced|pro>  # Set LLM tier (Flash 3.6 / 3.7 / 3.8)
+linguo config tts <hybrid|local|edge>    # Set speech synthesis engine
+linguo config speed <0.75|0.8|1.0>       # Set didactic playback pace
+linguo config voice <nicole|bella|samantha> # Set English voice persona
+linguo config route <auto|dell|local>    # Set network dispatch cascade
+linguo config reset              # Restore all parameters to canonical defaults
 
 # macOS Menu Bar Agent Management
 linguo --status-bar              # Display current launchd status of the menu bar agent
