@@ -1,53 +1,221 @@
-# Python
+# ==============================================================================
+# Linguo // Comprehensive & Extended .gitignore
+# Production-grade gitignore covering Python, Rust, macOS, Audio, SQLite,
+# Secrets, IDEs, and Build Artifacts.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Python Environment & Bytecode
+# ------------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
 env/
 venv/
 .venv/
+ENV/
+env.bak/
+venv.bak/
+.uv/
 
-# Linguo Local Data & Audio Caches
-history.db
-history.db-journal
-history.md
-*.pid
-*.lock
-*.mp3
-*.wav
-*.aiff
-audio/
-workspace/
+# Pytest, Coverage & Type Checkers
+.cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
 
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
+# Jupyter / IPython
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
 
-# Rust
+# ------------------------------------------------------------------------------
+# 2. Rust & Cargo Build Artifacts
+# ------------------------------------------------------------------------------
 target/
 **/target/
 Cargo.lock
+**/*.rs.bk
+*.cargo-ok
 
-# Build Dist Artifacts
-dist/
-*.dmg
-*.app
+# ------------------------------------------------------------------------------
+# 3. Linguo Local Data, SQLite & Runtime Caches
+# ------------------------------------------------------------------------------
+# Database files (WAL mode)
+history.db
+history.db-journal
+history.db-wal
+history.db-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+history.md
+cards_anki_export.tsv
 
-# Secrets & Security Gates
+# Runtime locks, PIDs & scratch
+*.pid
+*.lock
+/tmp/linguo_*
+workspace/
+audio/
+logs/
+cache/
+
+# Model weights & Large Binaries (Kokoro, HuggingFace, PyTorch, ONNX)
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.ckpt
+
+# ------------------------------------------------------------------------------
+# 4. Audio & Media Caches
+# ------------------------------------------------------------------------------
+*.mp3
+*.wav
+*.aiff
+*.ogg
+*.flac
+*.m4a
+*.aac
+*.pcm
+
+# ------------------------------------------------------------------------------
+# 5. Secrets, API Keys & Security Gates
+# ------------------------------------------------------------------------------
 .env
 .env.*
 !.env.example
+!.env.sample
 *.pem
 *.key
 *.token
 *.p12
+*.pfx
 *.crt
+*.der
 id_rsa
+id_rsa.pub
 id_ed25519
+id_ed25519.pub
+id_ecdsa
 credentials.json
+client_secret*.json
 service_account*.json
+auth.json
 *.secret
 secrets/
+private/
 
+# ------------------------------------------------------------------------------
+# 6. macOS & Apple System Files
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon\r\r
+*.dSYM.zip
+*.dSYM/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+
+# ------------------------------------------------------------------------------
+# 7. Packaging & Distribution Artifacts
+# ------------------------------------------------------------------------------
+dist/
+*.dmg
+*.pkg
+*.app/
+*.ipa
+*.xcarchive
+*.tar.gz
+*.zip
+
+# ------------------------------------------------------------------------------
+# 8. IDEs & Editors
+# ------------------------------------------------------------------------------
+# Visual Studio Code & Cursor
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.cursor/
+
+# JetBrains (PyCharm, CLion, RustRover)
+.idea/
+*.iml
+*.iws
+
+# Vim & Emacs
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+*~
+*.swp
+*.swo
+.#*
+\#*\#
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# ------------------------------------------------------------------------------
+# 9. Linux & Windows Junk
+# ------------------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*~
+*.bak
+*.orig
+core
+vgcore.*
