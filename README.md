@@ -1,4 +1,4 @@
-# Linguo: A Dual English–Thai Formative Assessment and Spaced-Repetition System
+# Linguo: Cambridge English Standard
 
 ## Abstract
 
@@ -311,7 +311,7 @@ python3 -m uvicorn scripts.linguo_server:app --host 0.0.0.0 --port 8765
 ```bibtex
 @software{linguo2026,
   author = {Linguo Project Contributors},
-  title = {Linguo: A Dual English-Thai Formative Assessment and Spaced-Repetition System},
+  title = {Linguo: Cambridge English Standard},
   year = {2026},
   url = {https://github.com/gptprojectmanager/linguo}
 }
