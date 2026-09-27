@@ -1,0 +1,49 @@
+name: Continuous Integration & Security Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-verify:
+    name: Test Suite & Security Audit
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Security Gate (Check Secrets & Credentials)
+        run: |
+          chmod +x scripts/check_secrets.sh
+          ./scripts/check_secrets.sh --all
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pydantic fastapi uvicorn pytest pytest-cov requests
+          # Install optional / speech mock dependencies
+          pip install edge-tts || true
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust HUD Cargo Unit Tests
+        run: |
+          cargo test --manifest-path gui/dash-gui/Cargo.toml
+
+      - name: Python Unit Test Suite (Core & Server)
+        run: |
+          pytest -v tests/test_unit_core.py tests/test_unit_server.py
+
+      - name: Isolated E2E Sandbox Lifecycle Test
+        run: |
+          python3 tests/test_e2e_isolated.py

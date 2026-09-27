@@ -14,9 +14,9 @@ mkdir -p "$HOME/.gemini/config/agents/linguo"
 mkdir -p "$HOME/.gemini/config/agents/linguo-fast"
 
 # 2. CLI Executable
-cp "$SCRIPT_DIR/bin/linguo" "$HOME/.local/bin/linguo"
+ln -sf "$SCRIPT_DIR/bin/linguo" "$HOME/.local/bin/linguo"
 chmod +x "$HOME/.local/bin/linguo"
-echo "✅ Copied binary to ~/.local/bin/linguo"
+echo "✅ Linked binary to ~/.local/bin/linguo"
 
 # 3. Agent Prompts
 cp "$SCRIPT_DIR/agents/linguo-fast/agent.md" "$HOME/.local/share/linguo/workspace/.agents/agents/linguo-fast/agent.md"
