@@ -4,6 +4,36 @@ All notable changes to **Linguo** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-09-27
+
+### 🎴 Starter Deck, Native APKG, Modular Architecture & Operational Stack
+- **15-Card CEFR A1–B2 Starter Deck**:
+  - Solves the cold-start problem (`0 cards` on fresh install) by pre-seeding 15 canonical Cambridge/British Council error archetypes directly into SQLite WAL `cards` table during `init_db()`.
+  - Covers articles, aspect, prepositions, conditionals, collocations, and quantifiers with single-blank active recall puzzles `[  ?  ]`.
+- **Native Anki Package Exporter (`.apkg`)**:
+  - Implemented pure-Python `.apkg` compiler in `linguo/pedagogy/export.py` using standard library `sqlite3` and `zipfile` (zero heavy external dependencies).
+  - Embeds custom 16-bit dark arcade CSS styling (`#0d1117`, gold accents, neon cyan highlights, glowing answer boxes) for Anki Desktop and AnkiMobile.
+  - CLI commands: `linguo export` (both TSV and APKG), `linguo export apkg`, `linguo export tsv`.
+- **Complete Modular Package Refactoring**:
+  - Decomposed the monolithic codebase into structured Python packages:
+    - `linguo/core/`: `config.py`, `db.py`, `models.py`, `safety.py`, `telemetry.py`, `starter_deck.py`.
+    - `linguo/audio/`: `engine.py` (Kokoro-82M 2-thread local CPU synthesis + Edge-TTS).
+    - `linguo/pedagogy/`: `export.py` (TSV and APKG generation).
+    - `linguo/platform/`: `macos.py` (pbcopy, AppleScript paste, sounds, notifications).
+  - `bin/linguo` preserved as a backwards-compatible wrapper maintaining 100% test compatibility.
+- **Dell 7670 Operational Deployment Stack**:
+  - `config/linguo-server.service`: Production systemd service unit running Uvicorn with 2 workers, resource bounds (4G RAM, 300% CPU), and journald logging.
+  - `config/cloudflare_tunnel.yml`: Cloudflare Tunnel ingress configuration routing `linguo.princyx.xyz` to port 8765.
+  - `config/prometheus_scrape.yml`: Prometheus scrape configuration for `/metrics` with Bearer auth token.
+  - `scripts/deploy_dell.sh`: Fully automated deployment script to initialize venv, configure systemd, and run health probes.
+- **Isolated E2E Sandbox Test Harness**:
+  - `tests/test_e2e_isolated.py`: Spawns ephemeral server on port 18765, runs 10 lifecycle checks in isolated temp directories, and proves zero host database contamination.
+  - Unified test suite (`./tests/test_all.sh`) expanded to 11/11 phases, all passing.
+- **Visual Showcase Redesign**:
+  - Replaced temporary card graphics with a panoramic 16:9 triptych (`docs/assets/linguo_archetypes_triptych.jpg`) showcasing the 3 narrative archetypes (Cyberpunk Past Simple, Fantasy RPG Verb Patterns, Tactical Steampunk Gerunds) with slapstick physical comedy and original cartoon characters.
+
+---
+
 ## [0.3.3] - 2026-09-26
 
 ### ⚙️ Interactive Configuration Matrix (GUI & CLI)
