@@ -81,12 +81,12 @@ if PYDANTIC_AVAILABLE:
                 return "FEW_A_FEW"
             if "PREP" in v_upper:
                 return "PREPOSITIONS"
+            if "AGREE" in v_upper or "SINGULAR" in v_upper:
+                return "AGREEMENT"
             if "VERB" in v_upper or "INFINITIVE" in v_upper:
                 return "VERB_PATTERNS"
             if "TENSE" in v_upper or "PAST" in v_upper:
                 return "TENSES"
-            if "AGREE" in v_upper or "SINGULAR" in v_upper:
-                return "AGREEMENT"
             if "ORDER" in v_upper:
                 return "WORD_ORDER"
             if "COLLOCAT" in v_upper:
@@ -106,11 +106,24 @@ else:
         pass
 
 
+def clean_json_text(raw: str) -> str:
+    """Strips Markdown fences and conversational boilerplate to expose pure JSON."""
+    cleaned = raw.strip()
+    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', cleaned, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    first_brace = cleaned.find('{')
+    last_brace = cleaned.rfind('}')
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return cleaned[first_brace:last_brace+1].strip()
+    return cleaned
+
+
 def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict:
     """Extracts JSON and validates through Pydantic v2 with deterministic fallbacks."""
     t0 = time.perf_counter()
-    json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    json_str = json_match.group(0) if json_match else raw_text.strip()
+    json_str = clean_json_text(raw_text)
+
 
     result = None
     if PYDANTIC_AVAILABLE:

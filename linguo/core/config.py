@@ -163,6 +163,15 @@ def show_config_cli(subargs: list[str]):
         save_config(cfg)
         print(f"✅ English voice impostata su: \033[1;32m{cfg['eng_voice']}\033[0m")
 
+    elif key in ("thai_voice", "thai"):
+        if "kanya" in val:
+            cfg["thai_voice"] = "Kanya"
+        else:
+            cfg["thai_voice"] = subargs[1]
+        save_config(cfg)
+        print(f"✅ Thai voice impostata su: \033[1;32m{cfg['thai_voice']}\033[0m")
+
+
     elif key in ("route", "dispatch", "dispatch_mode", "network"):
         if val in ("auto", "cascade"):
             cfg["dispatch_mode"] = "auto"
