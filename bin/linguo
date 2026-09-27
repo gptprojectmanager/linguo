@@ -1702,12 +1702,13 @@ def seed_archetypes_if_needed(conn: sqlite3.Connection = None):
 
 
 def seed_starter_deck_if_needed(conn: sqlite3.Connection = None):
-    """Seeds the 15 canonical CEFR A1-B2 cards into the cards table on cold start."""
+    """Seeds any missing canonical CEFR A1-B2 starter deck cards into cards table."""
     def _seed(c):
         cur = c.cursor()
-        cur.execute("SELECT count(*) FROM cards;")
-        if cur.fetchone()[0] == 0:
-            for card in STARTER_DECK:
+        cur.execute("SELECT error_category FROM cards;")
+        existing_cats = {r[0] for r in cur.fetchall()}
+        for card in STARTER_DECK:
+            if card["category"] not in existing_cats:
                 cur.execute("""
                     INSERT INTO cards (
                         error_category, sprite_name, card_title, cefr_level, card_type,
@@ -1720,7 +1721,7 @@ def seed_starter_deck_if_needed(conn: sqlite3.Connection = None):
                     card["front_challenge"], card["back_solution"], card["rule"], card["gag"],
                     card["thai_script"], card["thai_phonetic"], card["thai_tones"], card["thai_breakdown"]
                 ))
-            c.commit()
+        c.commit()
 
     if conn is not None:
         _seed(conn)
