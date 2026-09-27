@@ -1,0 +1,35 @@
+# Linguo Prometheus Alerting Rules
+# Defines alerts for backend latency, degraded ready probes, and 5xx error rates.
+
+groups:
+  - name: linguo_alerts
+    rules:
+      - alert: LinguoHighLatency
+        expr: histogram_quantile(0.95, sum(rate(linguo_request_duration_seconds_bucket[5m])) by (le)) > 3.0
+        for: 5m
+        labels:
+          severity: warning
+          service: linguo-backend
+        annotations:
+          summary: "Linguo high latency (P95 > 3.0s)"
+          description: "P95 response latency on Linguo API has exceeded 3.0s for 5 consecutive minutes on host {{ $labels.instance }}."
+
+      - alert: LinguoDegraded
+        expr: linguo_probe_ready == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: linguo-backend
+        annotations:
+          summary: "Linguo service degraded"
+          description: "Endpoint /health/ready reports service is degraded (HTTP 503 / probe=0) on {{ $labels.instance }}."
+
+      - alert: LinguoHighErrorRate
+        expr: (sum(rate(linguo_requests_total{status=~"5.."}[5m])) / sum(rate(linguo_requests_total[5m]))) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: linguo-backend
+        annotations:
+          summary: "Linguo high 5xx error rate (>5%)"
+          description: "More than 5% of requests returned HTTP 5xx errors over the last 5 minutes on {{ $labels.instance }}."
