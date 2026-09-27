@@ -167,3 +167,89 @@ def preload_thai_audio_cache():
 
     print(f"\n🎉 \033[1;32mCompletato:\033[0m {cached} nuovi mattoni memorizzati, {skipped} già presenti.")
     print(f"📁 Directory cache: \033[90m{thai_cache_dir}\033[0m\n")
+
+
+def preseed_starter_deck_audio():
+    """Batch synthesizes studio neural audio for all 15 starter deck cards (EN + TH)."""
+    from ..core.starter_deck import STARTER_DECK
+    from ..core import db as cdb
+    from ..core import config as ccfg
+
+    cdb.init_db()
+    ccfg.AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    thai_cache_dir = ccfg.DATA_DIR / "cache" / "thai"
+    thai_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n🎧 \033[1;36mPreriscaldamento audio per lo Starter Deck ({len(STARTER_DECK)} carte canoniche)...\033[0m")
+    
+    with sqlite3.connect(ccfg.DB_PATH) as conn:
+
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("PRAGMA table_info(cards);")
+        cols = [col[1] for col in c.fetchall()]
+        if "audio_eng_path" not in cols:
+            c.execute("ALTER TABLE cards ADD COLUMN audio_eng_path TEXT DEFAULT '';")
+        if "audio_thai_path" not in cols:
+            c.execute("ALTER TABLE cards ADD COLUMN audio_thai_path TEXT DEFAULT '';")
+
+        c.execute("SELECT id, card_title, front_challenge, back_solution, thai_script, source_history_ids FROM cards ORDER BY id ASC;")
+        rows = c.fetchall()
+
+        en_done, th_done = 0, 0
+        for row in rows:
+            cid = row["id"]
+            solution = row["back_solution"]
+            thai = row["thai_script"]
+            eng_file = AUDIO_DIR / f"eng_card_{cid}.mp3"
+            thai_file = AUDIO_DIR / f"thai_card_{cid}.mp3"
+
+            if not eng_file.exists():
+                print(f"  🔊 EN #{cid}: {solution}")
+                if synthesize_english(solution, eng_file):
+                    en_done += 1
+            else:
+                en_done += 1
+
+            thai_hash = hashlib.md5(f"{thai.strip()}_0.8".encode("utf-8")).hexdigest()
+            thai_cached = thai_cache_dir / f"{thai_hash}.mp3"
+            if not thai_cached.exists() or not thai_file.exists():
+                print(f"  🔊 TH #{cid}: {thai}")
+                if synthesize_thai(thai, thai_file):
+                    th_done += 1
+                if thai_cached.exists() and not thai_file.exists():
+                    shutil.copyfile(str(thai_cached), str(thai_file))
+            else:
+                th_done += 1
+
+            hist_id = None
+            source_ids = (row["source_history_ids"] or "").strip()
+            if source_ids:
+                first_id = source_ids.split(",")[0].strip()
+                if first_id.isdigit():
+                    hist_id = int(first_id)
+
+            if hist_id:
+                c.execute("UPDATE history SET audio_eng_path = ?, audio_thai_path = ? WHERE id = ?;",
+                          (str(eng_file), str(thai_file), hist_id))
+            else:
+                c.execute("""
+                    INSERT INTO history (
+                        timestamp, original_text, is_correct, corrected_english, grammar_tip, 
+                        english_better_alternative, pronunciation_tip, audio_eng_path, 
+                        audio_thai_path, thai_script, thai_phonetic, error_category, english_level
+                    ) VALUES (CURRENT_TIMESTAMP, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    row["front_challenge"], solution, "Starter Deck Canonical Rule",
+                    "", "", str(eng_file), str(thai_file), thai, "", "STARTER_DECK", "B1"
+                ))
+                new_hist_id = c.lastrowid
+                c.execute("UPDATE cards SET source_history_ids = ? WHERE id = ?;", (str(new_hist_id), cid))
+
+            c.execute("UPDATE cards SET audio_eng_path = ?, audio_thai_path = ? WHERE id = ?;",
+                      (str(eng_file), str(thai_file), cid))
+
+        conn.commit()
+
+    print(f"🎉 \033[1;32mStarter Deck audio completato:\033[0m {en_done} English / {th_done} Thai sincronizzati a 0 ms.\n")
+

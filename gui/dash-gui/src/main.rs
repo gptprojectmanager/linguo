@@ -272,6 +272,14 @@ impl LinguoGuiApp {
                         }
                     }
                     if !played {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                        let direct_card = PathBuf::from(&home).join(format!(".local/share/linguo/audio/eng_card_{}.mp3", card_id));
+                        if direct_card.exists() {
+                            let _ = Command::new("afplay").arg(&direct_card).status();
+                            played = true;
+                        }
+                    }
+                    if !played {
                         let say_voice = match voice.as_str() {
                             "Alex" | "am_adam" => "Alex",
                             _ => "Samantha",
@@ -279,6 +287,7 @@ impl LinguoGuiApp {
                         let rate = (175.0 * speed).round() as i32;
                         let _ = Command::new("say").args(["-v", say_voice, "-r", &rate.to_string(), &solution_text]).status();
                     }
+
                 });
             }
         }

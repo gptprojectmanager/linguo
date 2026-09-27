@@ -2183,6 +2183,14 @@ def preseed_thai_cache():
     print(f"\n🎉 \033[1;32mCompletato:\033[0m {cached} nuovi mattoni memorizzati, {skipped} già presenti.")
     print(f"📁 Directory cache: \033[90m{thai_cache_dir}\033[0m\n")
 
+    # Also pre-seed starter deck cards for instant 0ms offline neural audio
+    try:
+        from linguo.audio.engine import preseed_starter_deck_audio
+        preseed_starter_deck_audio()
+    except Exception as e:
+        sys.stderr.write(f"⚠️ Errore durante il pre-caching audio dello Starter Deck: {e}\n")
+
+
 
 def export_cards(format_type: str = "all"):
     """Exports cards to an Anki-compatible TSV and/or native .apkg file."""

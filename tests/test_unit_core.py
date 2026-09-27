@@ -417,6 +417,44 @@ class TestModularArchitecture:
         assert hasattr(linguo.pedagogy, "export_apkg")
         assert hasattr(linguo.pedagogy, "export_tsv")
         assert hasattr(linguo.audio, "synthesize_english")
+        assert hasattr(linguo.audio, "preseed_starter_deck_audio")
         assert hasattr(linguo.platform, "copy_to_clipboard")
+
+    def test_preseed_starter_deck_audio(self, monkeypatch, tmp_path):
+        import linguo.core.config as cfg
+        import linguo.core.db as cdb
+        import linguo.audio.engine as aeng
+
+        db_file = tmp_path / "preseed_test.db"
+        audio_dir = tmp_path / "audio"
+        cache_dir = tmp_path / "cache"
+
+        monkeypatch.setattr(cfg, "DB_PATH", db_file)
+        monkeypatch.setattr(cfg, "AUDIO_DIR", audio_dir)
+        monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(cdb, "DB_PATH", db_file)
+        monkeypatch.setattr(aeng, "DB_PATH", db_file)
+        monkeypatch.setattr(aeng, "AUDIO_DIR", audio_dir)
+        monkeypatch.setattr(aeng, "DATA_DIR", tmp_path)
+
+        # Mock synthesis to avoid hitting neural models in unit tests
+        monkeypatch.setattr(aeng, "synthesize_english", lambda text, path: (path.parent.mkdir(parents=True, exist_ok=True), path.write_text("fake_en"), True)[2])
+        monkeypatch.setattr(aeng, "synthesize_thai", lambda text, path, **kwargs: (path.parent.mkdir(parents=True, exist_ok=True), path.write_text("fake_th"), True)[2])
+
+        cdb.init_db()
+        aeng.preseed_starter_deck_audio()
+
+
+        # Verify all 15 cards have synthesized audio
+        for i in range(1, 16):
+            assert (audio_dir / f"eng_card_{i}.mp3").exists()
+            assert (audio_dir / f"thai_card_{i}.mp3").exists()
+
+        with sqlite3.connect(db_file) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM cards WHERE audio_eng_path != '' AND audio_thai_path != '';")
+            count = cur.fetchone()[0]
+            assert count == 15
+
 
 
