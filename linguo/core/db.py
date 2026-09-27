@@ -101,42 +101,58 @@ def init_db(seed_cards: bool = True):
         conn.commit()
 
 
-def seed_archetypes_if_needed(conn: sqlite3.Connection):
+def seed_archetypes_if_needed(conn: sqlite3.Connection = None):
     """Seeds default archetypes into SQLite card_archetypes table if missing."""
-    for cat, data in ARCHETYPES.items():
-        conn.execute("""
-            INSERT OR IGNORE INTO card_archetypes (
-                category, sprite_name, card_title, cefr_level, card_type,
-                front_challenge, back_solution, british_council_rule, gag_quote,
-                thai_script, thai_phonetic, thai_tones, thai_breakdown
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            cat, data["sprite"], data["title"], data["cefr"], data["type"],
-            data["front_challenge"], data["back_solution"], data["rule"], data["gag"],
-            data["thai_script"], data["thai_phonetic"], data["thai_tones"], data["thai_breakdown"]
-        ))
-
-
-def seed_starter_deck_if_needed(conn: sqlite3.Connection):
-    """Seeds any missing canonical CEFR A1-B2 starter deck cards into cards table."""
-    cursor = conn.cursor()
-    cursor.execute("SELECT error_category FROM cards;")
-    existing_cats = {r[0] for r in cursor.fetchall()}
-    for card in STARTER_DECK:
-        if card["category"] not in existing_cats:
-            cursor.execute("""
-                INSERT INTO cards (
-                    error_category, sprite_name, card_title, cefr_level, card_type,
+    def _seed(c):
+        for cat, data in ARCHETYPES.items():
+            c.execute("""
+                INSERT OR IGNORE INTO card_archetypes (
+                    category, sprite_name, card_title, cefr_level, card_type,
                     front_challenge, back_solution, british_council_rule, gag_quote,
-                    thai_script, thai_phonetic, thai_tones, thai_breakdown,
-                    source_history_ids, is_mastered
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+                    thai_script, thai_phonetic, thai_tones, thai_breakdown
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                card["category"], card["sprite"], card["title"], card["cefr"], card["type"],
-                card["front_challenge"], card["back_solution"], card["rule"], card["gag"],
-                card["thai_script"], card["thai_phonetic"], card["thai_tones"], card["thai_breakdown"]
+                cat, data["sprite"], data["title"], data["cefr"], data["type"],
+                data["front_challenge"], data["back_solution"], data["rule"], data["gag"],
+                data["thai_script"], data["thai_phonetic"], data["thai_tones"], data["thai_breakdown"]
             ))
+        c.commit()
+
+    if conn is not None:
+        _seed(conn)
+    else:
+        with sqlite3.connect(DB_PATH) as c:
+            _seed(c)
+
+
+def seed_starter_deck_if_needed(conn: sqlite3.Connection = None):
+    """Seeds any missing canonical CEFR A1-B2 starter deck cards into cards table."""
+    def _seed(c):
+        cursor = c.cursor()
+        cursor.execute("SELECT error_category FROM cards;")
+        existing_cats = {r[0] for r in cursor.fetchall()}
+        for card in STARTER_DECK:
+            if card["category"] not in existing_cats:
+                cursor.execute("""
+                    INSERT INTO cards (
+                        error_category, sprite_name, card_title, cefr_level, card_type,
+                        front_challenge, back_solution, british_council_rule, gag_quote,
+                        thai_script, thai_phonetic, thai_tones, thai_breakdown,
+                        source_history_ids, is_mastered
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+                """, (
+                    card["category"], card["sprite"], card["title"], card["cefr"], card["type"],
+                    card["front_challenge"], card["back_solution"], card["rule"], card["gag"],
+                    card["thai_script"], card["thai_phonetic"], card["thai_tones"], card["thai_breakdown"]
+                ))
+        c.commit()
+
+    if conn is not None:
+        _seed(conn)
+    else:
+        with sqlite3.connect(DB_PATH) as c:
+            _seed(c)
 
 
 def get_archetype(category: str) -> dict:

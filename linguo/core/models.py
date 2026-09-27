@@ -59,25 +59,25 @@ if PYDANTIC_AVAILABLE:
                 return "SENSITIVE_NO_CARD"
             if "ARTICLE" in v_upper:
                 return "ARTICLES"
-            if "SINCE" in v_upper or "FOR" in v_upper:
+            if re.search(r"\b(SINCE|FOR)\b", v_upper):
                 return "SINCE_FOR"
-            if "MAKE" in v_upper or "DO" in v_upper:
+            if re.search(r"\b(MAKE|DO)\b", v_upper):
                 return "MAKE_DO"
             if "MUCH" in v_upper or "MANY" in v_upper:
                 return "MUCH_MANY"
-            if "TELL" in v_upper or "SAY" in v_upper:
+            if re.search(r"\b(TELL|SAY)\b", v_upper):
                 return "SAY_TELL"
             if "PARTICIPLE" in v_upper or "BORED" in v_upper or "BORING" in v_upper:
                 return "PARTICIPLE_ADJECTIVES"
             if "STILL" in v_upper or "ALREADY" in v_upper:
                 return "STILL_ALREADY"
-            if "CONDITION" in v_upper or "IF" in v_upper:
+            if "CONDITION" in v_upper or re.search(r"\bIF\b", v_upper):
                 return "FIRST_CONDITIONAL"
             if "USED TO" in v_upper:
                 return "USED_TO"
             if "DEPEND" in v_upper:
                 return "DEPENDENT_PREPOSITIONS"
-            if "FEW" in v_upper:
+            if re.search(r"\bFEW\b", v_upper):
                 return "FEW_A_FEW"
             if "PREP" in v_upper:
                 return "PREPOSITIONS"
@@ -150,7 +150,7 @@ def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict
         # Emergency heuristic fallback
         result = {
             "transcribed_english": fallback_input,
-            "is_correct": True,
+            "is_correct": False,
             "error_category": "NONE",
             "english_level": "B1",
             "corrected_english": fallback_input,

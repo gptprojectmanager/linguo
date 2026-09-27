@@ -40,161 +40,13 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-try:
-    import pydantic
-    from pydantic import BaseModel, Field, field_validator
-    PYDANTIC_AVAILABLE = True
-except ImportError:
-    PYDANTIC_AVAILABLE = False
-
-
-
-SENSITIVE_KEYWORDS = {
-    # Weapons / Violence
-    "gun", "guns", "pistol", "rifle", "shoot", "shooting", "shot", "kill", "killing", "murder",
-    "knife", "knives", "stab", "stabbing", "bomb", "bombs", "explosive", "explosives",
-    "terrorist", "terrorism", "weapon", "weapons", "assault", "grenade", "bullet", "ammunition",
-    # Drugs / Illegal Substances
-    "cocaine", "heroin", "meth", "methamphetamine", "weed", "cannabis", "marijuana",
-    "narcotic", "narcotics", "overdose", "cartel", "drug deal", "drug dealer", "ecstasy", "fentanyl",
-    # Explicit / NSFW
-    "sex", "sexual", "porn", "pornography", "naked", "nude", "penis", "vagina", "boobs", "dick",
-    "pussy", "prostitute", "prostitution", "escort", "blowjob", "fuck", "fucking", "orgasm"
-}
-
-
-def detect_sensitive_content(text: str) -> bool:
-    """Fast deterministic gate (Gate 2) to identify NSFW, violent, or sensitive terms."""
-    if not text:
-        return False
-    lowered = text.lower()
-    for phrase in ["drug deal", "drug dealer", "blow job", "have sex", "kill someone"]:
-        if phrase in lowered:
-            return True
-    words = set(re.findall(r"\b[a-z]+\b", lowered))
-    return bool(words & SENSITIVE_KEYWORDS)
-
-
-if PYDANTIC_AVAILABLE:
-    class LinguoAnalysis(BaseModel):
-        transcribed_english: str = ""
-        is_correct: bool = True
-        error_category: Literal[
-            "ARTICLES", "PREPOSITIONS", "VERB_PATTERNS", "TENSES",
-            "WORD_ORDER", "AGREEMENT", "COLLOCATIONS", "SENSITIVE_NO_CARD", "NONE"
-        ] = "NONE"
-        english_level: str = "B1"
-        corrected_english: str = ""
-        grammar_tip: str = ""
-        english_better_alternative: str = ""
-        pronunciation_tip: str = ""
-        thai_concise_script: str = ""
-        thai_phonetic_western: str = ""
-        thai_breakdown: str = ""
-        thai_grammar_tip: str = ""
-
-        @field_validator("error_category", mode="before")
-        @classmethod
-        def sanitize_error_category(cls, v):
-            """Auto-heals LLM hallucinations into strict standard categories."""
-            if not v or not isinstance(v, str):
-                return "NONE"
-            v_upper = v.upper().strip()
-            allowed = {
-                "ARTICLES", "PREPOSITIONS", "VERB_PATTERNS", "TENSES",
-                "WORD_ORDER", "AGREEMENT", "COLLOCATIONS", "SENSITIVE_NO_CARD", "NONE"
-            }
-            if v_upper in allowed:
-                return v_upper
-            if "SENSITIVE" in v_upper or "NSFW" in v_upper or "SAFETY" in v_upper:
-                return "SENSITIVE_NO_CARD"
-            if "ARTICLE" in v_upper:
-                return "ARTICLES"
-            if "PREP" in v_upper:
-                return "PREPOSITIONS"
-            if "VERB" in v_upper or "INFINITIVE" in v_upper:
-                return "VERB_PATTERNS"
-            if "TENSE" in v_upper or "PAST" in v_upper:
-                return "TENSES"
-            if "AGREE" in v_upper or "SINGULAR" in v_upper:
-                return "AGREEMENT"
-            if "ORDER" in v_upper:
-                return "WORD_ORDER"
-            if "COLLOCAT" in v_upper:
-                return "COLLOCATIONS"
-            return "NONE"
-
-        @field_validator("is_correct", mode="before")
-        @classmethod
-        def sanitize_is_correct(cls, v):
-            if isinstance(v, bool):
-                return v
-            if isinstance(v, str):
-                return v.strip().lower() in ("true", "1", "yes")
-            return bool(v)
-
-
-def parse_and_validate_analysis(raw_text: str, fallback_input: str = "") -> dict:
-    """Extracts JSON and validates through Pydantic v2 with deterministic fallbacks."""
-    t0 = time.perf_counter()
-    json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    json_str = json_match.group(0) if json_match else raw_text.strip()
-
-    result = None
-    if PYDANTIC_AVAILABLE:
-        try:
-            model = LinguoAnalysis.model_validate_json(json_str)
-            if not model.transcribed_english and fallback_input:
-                model.transcribed_english = fallback_input
-            if not model.corrected_english:
-                model.corrected_english = model.transcribed_english
-            result = model.model_dump()
-        except Exception:
-            try:
-                parsed = json.loads(json_str)
-                model = LinguoAnalysis.model_validate(parsed)
-                if not model.transcribed_english and fallback_input:
-                    model.transcribed_english = fallback_input
-                if not model.corrected_english:
-                    model.corrected_english = model.transcribed_english
-                result = model.model_dump()
-            except Exception as e:
-                sys.stderr.write(f"Pydantic validation warning: {e}\n")
-
-    if result is None:
-        try:
-            data = json.loads(json_str)
-            if not data.get("transcribed_english"):
-                data["transcribed_english"] = fallback_input
-            if not data.get("corrected_english"):
-                data["corrected_english"] = data["transcribed_english"]
-            result = data
-        except Exception as e:
-            sys.stderr.write(f"JSON decode error: {e}\n")
-            result = {
-                "transcribed_english": fallback_input,
-                "is_correct": False,
-                "error_category": "NONE",
-                "english_level": "B1",
-                "corrected_english": fallback_input,
-                "grammar_tip": f"Error parsing AI response: {e}",
-                "english_better_alternative": "",
-                "pronunciation_tip": "",
-                "thai_concise_script": "เกิดข้อผิดพลาด",
-                "thai_phonetic_western": "gèet khɔ̂ɔ-phìt-phlâat",
-                "thai_breakdown": "Error",
-            }
-
-    # Gate 2: Enforce SENSITIVE_NO_CARD if sensitive input is detected
-    raw_to_check = f"{fallback_input} {result.get('transcribed_english', '')} {result.get('corrected_english', '')}"
-    if detect_sensitive_content(raw_to_check):
-        result["error_category"] = "SENSITIVE_NO_CARD"
-        log_event("WARN", "SAFETY_GATE", "Sensitive content detected: flagged SENSITIVE_NO_CARD (no MTG arcade card will be minted)")
-
-    validation_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-    result["_validation_ms"] = validation_ms
-    log_event("DEBUG", "VALIDATION", f"Pydantic schema parsed in {validation_ms:.3f}ms", {"category": result.get("error_category", "NONE")})
-    return result
+from linguo.core.safety import SENSITIVE_KEYWORDS, detect_sensitive_content
+from linguo.core.models import (
+    PYDANTIC_AVAILABLE,
+    LinguoAnalysis,
+    parse_and_validate_analysis,
+    clean_json_text,
+)
 
 
 
@@ -225,294 +77,34 @@ LOGS_DIR = DATA_DIR / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-_LAST_LOG_CLEANUP = 0.0
+import pydantic
+from linguo.core import telemetry as _tel_mod
+from linguo.core import config as _cfg_mod
 
-
-def rotate_and_cleanup_logs(max_days: int = 30):
-    """Parsimonious log retention: purges daily log files older than max_days (30 days)."""
-    global _LAST_LOG_CLEANUP
-    now = time.time()
-    if now - _LAST_LOG_CLEANUP < 3600:
-        return
-    _LAST_LOG_CLEANUP = now
-    cutoff = now - (max_days * 86400)
-    for f in LOGS_DIR.glob("linguo_*.log"):
-        try:
-            if f.stat().st_mtime < cutoff:
-                f.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-def log_event(level: str, component: str, message: str, meta: dict | None = None):
-    """Appends structured log to daily rotating file and emits NDJSON for Vector/Loki ingestion."""
-    try:
-        rotate_and_cleanup_logs(30)
-        now_dt = datetime.now()
-        today = now_dt.strftime("%Y-%m-%d")
-        log_file = LOGS_DIR / f"linguo_{today}.log"
-        jsonl_file = LOGS_DIR / "linguo_events.jsonl"
-        ts = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        meta_str = f" | {json.dumps(meta, ensure_ascii=False)}" if meta else ""
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] [{level.upper()}] [{component}] {message}{meta_str}\n")
-
-        # Emit single-line NDJSON for enterprise log aggregation (Vector / Loki / Promtail)
-        json_entry = {
-            "timestamp": now_dt.isoformat(),
-            "level": level.upper(),
-            "component": component,
-            "message": message,
-            "meta": meta or {}
-        }
-        with open(jsonl_file, "a", encoding="utf-8") as f_json:
-            f_json.write(json.dumps(json_entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-class PerfTracker:
-    """Measures execution latency across individual operations to profile bottlenecks and fix bugs."""
-    def __init__(self, action: str):
-        self.action = action
-        self.timings = {}
-        self.start_total = time.perf_counter()
-
-    @contextmanager
-    def measure(self, step_name: str):
-        t0 = time.perf_counter()
-        try:
-            yield
-        finally:
-            dt_ms = (time.perf_counter() - t0) * 1000.0
-            self.timings[step_name] = round(dt_ms, 2)
-
-    def finish(self) -> dict:
-        total_ms = (time.perf_counter() - self.start_total) * 1000.0
-        self.timings["total_ms"] = round(total_ms, 2)
-        log_event("INFO", "PERF", f"{self.action} completed", self.timings)
-        return self.timings
-
-
-def print_trace_summary(timings: dict):
-    """Prints a styled execution latency table to diagnose pipeline bottlenecks."""
-    print("\n\033[1;36m⏱️  ─── Linguo Latency & Bottleneck Trace ───\033[0m")
-    total = timings.get("total_ms", 1.0)
-    for step, ms in timings.items():
-        if step == "total_ms":
-            continue
-        pct = (ms / total) * 100.0 if total > 0 else 0
-        bar = "█" * int(min(20, max(1, pct / 5)))
-        print(f"  • \033[1;33m{step.ljust(22)}\033[0m: \033[1m{ms:>7.2f} ms\033[0m ({pct:>5.1f}%) \033[90m{bar}\033[0m")
-    print(f"  ──────────────────────────────────────────")
-    print(f"  🏁 \033[1;32m{'Total Pipeline'.ljust(20)}\033[0m: \033[1;32m{total:>7.2f} ms\033[0m\n")
-
-
-def show_logs(limit: int = 30):
-    """Displays the last N structured log entries from the 30-day rotating logs."""
-    rotate_and_cleanup_logs(30)
-    log_files = sorted(LOGS_DIR.glob("linguo_*.log"))
-    if not log_files:
-        print("\n\033[1;33m📋 Nessun file di log recente presente in:\033[0m", LOGS_DIR)
-        return
-
-    print(f"\n\033[1;36m📋 ─── Linguo Logs (Ultime {limit} voci, retention 30 giorni) ───\033[0m\n")
-    all_lines = []
-    for lf in log_files[-3:]:
-        try:
-            with open(lf, "r", encoding="utf-8") as f:
-                all_lines.extend(f.readlines())
-        except Exception:
-            pass
-
-    for line in all_lines[-limit:]:
-        line = line.strip()
-        if "[PERF]" in line:
-            print(f"\033[90m{line}\033[0m")
-        elif "[ERROR]" in line or "[ERR]" in line:
-            print(f"\033[1;31m{line}\033[0m")
-        elif "[WARN]" in line:
-            print(f"\033[1;33m{line}\033[0m")
-        else:
-            print(f"\033[36m{line}\033[0m")
-    print()
-
-
-
-DEFAULT_CONFIG = {
-    "hotkey": "<ctrl>+<alt>+<space>",
-    "auto_paste": True,
-    "sound_feedback": True,
-    "tts_engine": "hybrid",  # "hybrid" = Kokoro-82M (English local, 2-core) + Edge-TTS (Thai studio)
-    "eng_voice": "af_nicole", # "af_nicole" | "Samantha" | "am_adam" | "Alex"
-    "thai_voice": "th-TH-PremwadeeNeural", # Edge-TTS Thai voice
-    "speed": 0.8,            # 0.8x playback speed for clear didactic articulation
-    "notifications": True,
-    "model": "gemini-3.6-flash-low",       # Real-time coach model (Fast 3.6 / Balanced 3.7 / Deep 3.8)
-    "card_model": "gemini-3.8-flash-high", # Card & Graphic production quality (canon / 3.7 / 3.8)
-    "dispatch_mode": "auto"  # "auto" | "dell" | "local"
-}
-
+DEFAULT_CONFIG = _cfg_mod.DEFAULT_CONFIG
 
 def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG.copy()
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            for k, v in DEFAULT_CONFIG.items():
-                if k not in cfg:
-                    cfg[k] = v
-            return cfg
-    except Exception:
-        return DEFAULT_CONFIG.copy()
-
+    _cfg_mod.CONFIG_PATH = CONFIG_PATH
+    return _cfg_mod.load_config()
 
 def save_config(cfg: dict):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-
+    _cfg_mod.CONFIG_PATH = CONFIG_PATH
+    return _cfg_mod.save_config(cfg)
 
 def show_config_cli(subargs: list[str]):
-    """Inspects or updates the Linguo configuration matrix with deterministic feedback."""
-    cfg = load_config()
+    _cfg_mod.CONFIG_PATH = CONFIG_PATH
+    return _cfg_mod.show_config_cli(subargs)
 
-    if not subargs:
-        print("\n\033[1;34m─── Linguo Configuration Matrix (Operativo) ───\033[0m")
-        model = cfg.get("model", "gemini-3.6-flash-low")
-        card_model = cfg.get("card_model", "gemini-3.8-flash-high")
-        tts = cfg.get("tts_engine", "hybrid")
-        speed = cfg.get("speed", 0.8)
-        eng_voice = cfg.get("eng_voice", "af_nicole")
-        thai_voice = cfg.get("thai_voice", "th-TH-PremwadeeNeural")
-        route = cfg.get("dispatch_mode", "auto")
-        auto_paste = cfg.get("auto_paste", True)
-        sound = cfg.get("sound_feedback", True)
-        notify = cfg.get("notifications", True)
-        hotkey = cfg.get("hotkey", "<ctrl>+<alt>+<space>")
+def log_event(level: str, component: str, message: str, meta: dict | None = None):
+    _tel_mod.LOGS_DIR = LOGS_DIR
+    return _tel_mod.log_event(level, component, message, meta)
 
-        print(f"  \033[1m1. Coach Model:\033[0m       \033[1;32m{model:<22}\033[0m [Opzioni: gemini-3.6-flash-low (⚡ Fast 3.6 Low), gemini-3.7-flash-medium (⚖️ Balanced), gemini-3.8-flash-high (🧠 Deep 3.8 Pro)]")
-        print(f"  \033[1m2. Card Production:\033[0m   \033[1;32m{card_model:<22}\033[0m [Opzioni: canon (⚡ 0 Token / Istantaneo), gemini-3.7-flash-medium (⚖️ Balanced), gemini-3.8-flash-high (🔬 Studio High)]")
-        print(f"  \033[1m3. TTS Engine:\033[0m        \033[1;32m{tts:<22}\033[0m [Opzioni: hybrid (Kokoro+Edge), local (Say offline), edge (Azure Cloud)]")
-        print(f"  \033[1m4. Playback Speed:\033[0m    \033[1;32m{str(speed) + 'x':<22}\033[0m [Opzioni: 0.75 (lenta), 0.8 (didattica), 1.0 (naturale)]")
-        print(f"  \033[1m5. English Voice:\033[0m     \033[1;32m{eng_voice:<22}\033[0m [Opzioni: 👩 af_nicole (Studio Neural), 👩 Samantha (macOS Built-in), 👨 am_adam (Studio Neural), 👨 Alex (macOS Built-in)]")
-        print(f"  \033[1m6. Thai Voice:\033[0m        \033[1;32m{thai_voice:<22}\033[0m [Opzioni: th-TH-PremwadeeNeural (Edge Studio), Kanya (Say offline)]")
-        print(f"  \033[1m7. Dispatch Route:\033[0m    \033[1;32m{route:<22}\033[0m [Opzioni: auto (Cascade WG->CF->Local), dell (Force Server), local (Force Mac)]")
-        print(f"  \033[1m8. Auto-Paste:\033[0m        \033[1;32m{str(auto_paste):<22}\033[0m [Opzioni: on, off]")
-        print(f"  \033[1m9. Sound Feedback:\033[0m    \033[1;32m{str(sound):<22}\033[0m [Opzioni: on, off]")
-        print(f" \033[1m10. Notifications:\033[0m     \033[1;32m{str(notify):<22}\033[0m [Opzioni: on, off]")
-        print(f" \033[1m11. Global Hotkey:\033[0m     \033[1;32m{hotkey:<22}\033[0m")
-        print(f"\n📁 File di configurazione: \033[36m{CONFIG_PATH}\033[0m")
-        print("💡 Modifica: \033[1mlinguo config <parametro> <valore>\033[0m  (es: linguo config model balanced, linguo config card canon, linguo config voice adam)\n")
-        return
-
-    key = subargs[0].lower().strip()
-    val = subargs[1].lower().strip() if len(subargs) > 1 else ""
-
-    if key == "reset":
-        save_config(DEFAULT_CONFIG)
-        print("✅ Configurazione ripristinata ai valori predefiniti di fabbrica.")
-        return
-
-    if not val:
-        print(f"⚠️ Specifica un valore per '{key}'. Esempio: linguo config {key} <valore>")
-        return
-
-    if key in ("model", "llm", "engine-llm", "coach_model"):
-        if val in ("fast", "eco", "low", "3.6", "gemini-3.6-flash-low"):
-            cfg["model"] = "gemini-3.6-flash-low"
-        elif val in ("balanced", "medium", "3.7", "gemini-3.7-flash-medium"):
-            cfg["model"] = "gemini-3.7-flash-medium"
-        elif val in ("pro", "deep", "high", "3.8", "gemini-3.8-flash-high"):
-            cfg["model"] = "gemini-3.8-flash-high"
-        else:
-            cfg["model"] = subargs[1]
-        save_config(cfg)
-        print(f"✅ Real-Time Coach Model impostato su: \033[1;32m{cfg['model']}\033[0m")
-
-    elif key in ("card", "card_model", "cards_model", "audit_model"):
-        if val in ("canon", "none", "fast", "0", "zero", "offline"):
-            cfg["card_model"] = "canon"
-        elif val in ("balanced", "3.7", "gemini-3.7-flash-medium"):
-            cfg["card_model"] = "gemini-3.7-flash-medium"
-        elif val in ("pro", "deep", "studio", "3.8", "gemini-3.8-flash-high"):
-            cfg["card_model"] = "gemini-3.8-flash-high"
-        else:
-            cfg["card_model"] = subargs[1]
-        save_config(cfg)
-        print(f"✅ Card & Graphic Production Model impostato su: \033[1;32m{cfg['card_model']}\033[0m")
-
-    elif key in ("tts", "tts_engine", "speech"):
-        if val in ("hybrid", "kokoro-edge"):
-            cfg["tts_engine"] = "hybrid"
-        elif val in ("local", "say", "offline", "mac"):
-            cfg["tts_engine"] = "local"
-        elif val in ("edge", "cloud", "azure"):
-            cfg["tts_engine"] = "edge"
-        elif val in ("kokoro", "local-kokoro"):
-            cfg["tts_engine"] = "kokoro"
-        else:
-            cfg["tts_engine"] = val
-        save_config(cfg)
-        print(f"✅ TTS Engine impostato su: \033[1;32m{cfg['tts_engine']}\033[0m")
-
-    elif key in ("speed", "rate"):
-        try:
-            sp = float(val)
-            if 0.5 <= sp <= 2.0:
-                cfg["speed"] = sp
-                save_config(cfg)
-                print(f"✅ Playback speed impostata su: \033[1;32m{sp}x\033[0m")
-            else:
-                print("⚠️ Velocità consigliata tra 0.75 e 1.0 (es: 0.75, 0.8, 1.0)")
-        except ValueError:
-            print("⚠️ Valore numerico non valido per speed.")
-
-    elif key in ("voice", "eng_voice", "english_voice"):
-        if "nicole" in val:
-            cfg["eng_voice"] = "af_nicole"
-        elif "samantha" in val:
-            cfg["eng_voice"] = "Samantha"
-        elif "adam" in val:
-            cfg["eng_voice"] = "am_adam"
-        elif "alex" in val:
-            cfg["eng_voice"] = "Alex"
-        else:
-            cfg["eng_voice"] = subargs[1]
-        save_config(cfg)
-        print(f"✅ English voice impostata su: \033[1;32m{cfg['eng_voice']}\033[0m")
-
-    elif key in ("route", "dispatch", "dispatch_mode", "network"):
-        if val in ("auto", "cascade"):
-            cfg["dispatch_mode"] = "auto"
-        elif val in ("dell", "server", "remote"):
-            cfg["dispatch_mode"] = "dell"
-        elif val in ("local", "mac"):
-            cfg["dispatch_mode"] = "local"
-        else:
-            print("⚠️ Opzioni route valide: auto, dell, local")
-            return
-        save_config(cfg)
-        print(f"✅ Dispatch route impostato su: \033[1;32m{cfg['dispatch_mode']}\033[0m")
-
-    elif key in ("paste", "auto_paste", "auto-paste"):
-        cfg["auto_paste"] = val in ("1", "true", "on", "yes", "si")
-        save_config(cfg)
-        print(f"✅ Auto-paste impostato su: \033[1;32m{cfg['auto_paste']}\033[0m")
-
-    elif key in ("sound", "sound_feedback", "audio_feedback"):
-        cfg["sound_feedback"] = val in ("1", "true", "on", "yes", "si")
-        save_config(cfg)
-        print(f"✅ Audio feedback impostato su: \033[1;32m{cfg['sound_feedback']}\033[0m")
-
-    elif key in ("notify", "notifications"):
-        cfg["notifications"] = val in ("1", "true", "on", "yes", "si")
-        save_config(cfg)
-        print(f"✅ Notifiche desktop impostate su: \033[1;32m{cfg['notifications']}\033[0m")
-
-    else:
-        print(f"⚠️ Parametro sconosciuto '{key}'. Esegui 'linguo config' per vedere tutti i parametri disponibili.")
+from linguo.core.telemetry import (
+    rotate_and_cleanup_logs,
+    PerfTracker,
+    print_trace_summary,
+    show_logs,
+)
 
 
 def init_db():
@@ -602,41 +194,13 @@ def init_db():
         conn.commit()
 
 
-def copy_to_clipboard(text: str):
-    """Copies text to macOS clipboard using pbcopy."""
-    try:
-        p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE, close_fds=True)
-        p.communicate(input=text.encode("utf-8"))
-    except Exception as e:
-        sys.stderr.write(f"Failed to copy to clipboard: {e}\n")
-
-
-def paste_to_active_window():
-    """Simulates Cmd+V via AppleScript to instantly paste text into any focused app."""
-    script = 'tell application "System Events" to keystroke "v" using command down'
-    subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def play_sound(sound_name: str = "Tink"):
-    """Plays subtle macOS feedback sound."""
-    cfg = load_config()
-    if not cfg.get("sound_feedback", True):
-        return
-    sound_path = f"/System/Library/Sounds/{sound_name}.aiff"
-    if os.path.exists(sound_path):
-        subprocess.Popen(["afplay", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def show_mac_notification(title: str, subtitle: str, message: str):
-    """Displays native macOS Notification Banner."""
-    cfg = load_config()
-    if not cfg.get("notifications", True):
-        return
-    safe_title = title.replace('"', '\\"')
-    safe_subtitle = subtitle.replace('"', '\\"')
-    safe_msg = message.replace('"', '\\"')
-    apple_script = f'display notification "{safe_msg}" with title "{safe_title}" subtitle "{safe_subtitle}"'
-    subprocess.Popen(["osascript", "-e", apple_script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+from linguo.platform.macos import (
+    copy_to_clipboard,
+    paste_to_active_window,
+    play_sound,
+    show_mac_notification,
+    get_python_cocoa_path,
+)
 
 
 def get_running_recorder_pid() -> int | None:
@@ -1455,20 +1019,6 @@ def run_interactive_board():
     curses.wrapper(_tui)
 
 
-def get_python_cocoa_path() -> str:
-    """Finds a Python interpreter with PyObjC Cocoa installed."""
-    candidates = [sys.executable, "/usr/local/bin/python3", "/opt/homebrew/bin/python3", "/usr/bin/python3"]
-    for c in candidates:
-        if c and os.path.exists(c):
-            try:
-                res = subprocess.run([c, "-c", "import Cocoa"], capture_output=True)
-                if res.returncode == 0:
-                    return c
-            except Exception:
-                pass
-    return sys.executable
-
-
 def install_launch_agent() -> bool:
     """Installs and starts the macOS Menu Bar LaunchAgent com.linguo.bar."""
     LAUNCH_AGENT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1675,89 +1225,11 @@ def show_history(limit: int = 5, as_json: bool = False):
 
 
 from linguo.core.starter_deck import STARTER_DECK, ARCHETYPES
-
-
-def seed_archetypes_if_needed(conn: sqlite3.Connection = None):
-    """Seeds default archetypes into SQLite card_archetypes table if empty."""
-    def _seed(c):
-        for cat, data in ARCHETYPES.items():
-            c.execute("""
-                INSERT OR IGNORE INTO card_archetypes (
-                    category, sprite_name, card_title, cefr_level, card_type,
-                    front_challenge, back_solution, british_council_rule, gag_quote,
-                    thai_script, thai_phonetic, thai_tones, thai_breakdown
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                cat, data["sprite"], data["title"], data["cefr"], data["type"],
-                data["front_challenge"], data["back_solution"], data["rule"], data["gag"],
-                data["thai_script"], data["thai_phonetic"], data["thai_tones"], data["thai_breakdown"]
-            ))
-        c.commit()
-
-    if conn is not None:
-        _seed(conn)
-    else:
-        with sqlite3.connect(DB_PATH) as c:
-            _seed(c)
-
-
-def seed_starter_deck_if_needed(conn: sqlite3.Connection = None):
-    """Seeds any missing canonical CEFR A1-B2 starter deck cards into cards table."""
-    def _seed(c):
-        cur = c.cursor()
-        cur.execute("SELECT error_category FROM cards;")
-        existing_cats = {r[0] for r in cur.fetchall()}
-        for card in STARTER_DECK:
-            if card["category"] not in existing_cats:
-                cur.execute("""
-                    INSERT INTO cards (
-                        error_category, sprite_name, card_title, cefr_level, card_type,
-                        front_challenge, back_solution, british_council_rule, gag_quote,
-                        thai_script, thai_phonetic, thai_tones, thai_breakdown,
-                        source_history_ids, is_mastered
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
-                """, (
-                    card["category"], card["sprite"], card["title"], card["cefr"], card["type"],
-                    card["front_challenge"], card["back_solution"], card["rule"], card["gag"],
-                    card["thai_script"], card["thai_phonetic"], card["thai_tones"], card["thai_breakdown"]
-                ))
-        c.commit()
-
-    if conn is not None:
-        _seed(conn)
-    else:
-        with sqlite3.connect(DB_PATH) as c:
-            _seed(c)
-
-
-def get_archetype(category: str) -> dict:
-    """Dynamically loads archetype from SQLite table, falling back to Python defaults."""
-    cat = category.upper().strip()
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM card_archetypes WHERE category = ?", (cat,))
-            row = cur.fetchone()
-            if row:
-                return {
-                    "sprite": row["sprite_name"],
-                    "title": row["card_title"],
-                    "cefr": row["cefr_level"],
-                    "type": row["card_type"],
-                    "front_challenge": row["front_challenge"],
-                    "back_solution": row["back_solution"],
-                    "rule": row["british_council_rule"],
-                    "gag": row["gag_quote"],
-                    "thai_script": row["thai_script"],
-                    "thai_phonetic": row["thai_phonetic"],
-                    "thai_tones": row["thai_tones"],
-                    "thai_breakdown": row["thai_breakdown"],
-                }
-    except Exception:
-        pass
-    return ARCHETYPES.get(cat, ARCHETYPES.get("VERB_PATTERNS"))
+from linguo.core.db import (
+    seed_archetypes_if_needed,
+    seed_starter_deck_if_needed,
+    get_archetype,
+)
 
 
 def classify_error(row: dict) -> str:
