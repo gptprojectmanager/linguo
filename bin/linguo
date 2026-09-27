@@ -1656,8 +1656,9 @@ def show_history(limit: int = 5, as_json: bool = False):
         return
 
     print(f"\n\033[1;34m─── Linguo History (Last {len(rows)} entries) ───\033[0m")
-    for r in reversed(rows):
-        status = "✅" if r["is_correct"] else "⚠️"
+    for row in reversed(rows):
+        r = dict(row)
+        status = "✅" if r.get("is_correct") else "⚠️"
         lvl = f"[{r.get('english_level', 'B1')}]"
         star = "★" if r.get("is_starred") else ""
         print(f"\n#{r['id']} [{r['timestamp']}] {lvl} {star} {status}")

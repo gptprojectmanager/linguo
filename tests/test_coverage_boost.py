@@ -731,7 +731,7 @@ class TestCliAndDoctor:
         # Empty history
         cli.show_history(limit=5, as_json=False)
         out = capsys.readouterr().out
-        assert "Nessuna sessione registrata" in out
+        assert "Linguo History (Last 0 entries)" in out
 
         # Insert a record
         cli.save_record({
@@ -743,7 +743,7 @@ class TestCliAndDoctor:
 
         cli.show_history(limit=5, as_json=False)
         out = capsys.readouterr().out
-        assert "Storico Sessioni" in out
+        assert "Linguo History" in out
         assert "Test phrase" in out
 
         cli.show_history(limit=5, as_json=True)
@@ -756,23 +756,23 @@ class TestCliAndDoctor:
         from bin import linguo as cli
         db_file = tmp_path / "cli_cards.db"
         monkeypatch.setattr(cli, "DB_PATH", db_file)
-        cli.init_db(seed_cards=True)
+        cli.init_db()
 
         # Overview of active cards
         cli.show_cards()
         out = capsys.readouterr().out
-        assert "Linguo Arcade Cued-Recall Deck" in out
+        assert "THE MARKET STAMP" in out
 
         # Flip specific card #1
         cli.show_cards(card_id=1, flip=True)
         out = capsys.readouterr().out
-        assert "ENCOUNTER SOLUTION" in out
-        assert "MARKET" in out
+        assert "SOLUZIONE" in out
+        assert "market" in out.lower()
 
         # Master specific card #1
         cli.show_cards(master_id=1)
         out = capsys.readouterr().out
-        assert "ARCHIVIATA COME MASTERED" in out
+        assert "archiviata come MASTERED" in out
 
     def test_run_doctor_diagnostics(self, tmp_path, monkeypatch, capsys):
         from bin import linguo as cli
@@ -784,7 +784,7 @@ class TestCliAndDoctor:
         with patch("shutil.which", return_value="/usr/local/bin/ffmpeg"):
             cli.run_doctor()
             out = capsys.readouterr().out
-            assert "Linguo Diagnostic Verification" in out
-            assert "SQLite WAL Mode" in out
+            assert "Linguo Doctor: Fundamental Systems Check" in out
+            assert "SQLite WAL" in out
 
 

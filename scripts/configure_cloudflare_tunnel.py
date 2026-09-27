@@ -11,8 +11,15 @@ Usage:
 import os
 import sys
 import json
+import ssl
 import urllib.request
 import urllib.error
+
+try:
+    import certifi
+    SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    SSL_CTX = ssl._create_unverified_context()
 
 TUNNEL_ID = "136e6875-c047-4b95-a84a-bdc9d9fbb771"  # home-recovery tunnel on Dell 7670
 HOSTNAME = "linguo.princyx.xyz"
@@ -44,7 +51,7 @@ def cf_request(url: str, token: str, method: str = "GET", data: dict = None) -> 
     if data is not None:
         req.data = json.dumps(data).encode("utf-8")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as resp:
             body = resp.read().decode("utf-8")
             return json.loads(body)
     except urllib.error.HTTPError as e:
@@ -78,7 +85,7 @@ def get_zone_id(token: str, zone_name: str) -> str:
     if not zones:
         raise RuntimeError(f"Zona DNS '{zone_name}' non trovata per questo account.")
     zone_id = zones[0]["id"]
-    print(f"  • Zone ID: \033[1;32{zone_id}\033[0m")
+    print(f"  • Zone ID: \033[1;32m{zone_id}\033[0m")
     return zone_id
 
 
@@ -177,7 +184,7 @@ def test_endpoint():
     print(f"\n🩺 Verifica Probe Remoto via HTTPS: https://{HOSTNAME}/health ...")
     try:
         req = urllib.request.Request(f"https://{HOSTNAME}/health")
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=SSL_CTX) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             print(f"  🎉 \033[1;32mONLINE! HTTP 200 OK\033[0m -> {data}")
     except Exception as e:
