@@ -12,6 +12,7 @@ APP_NAME="Linguo"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 VERSION=$(grep -m1 '^version =' "$SCRIPT_DIR/pyproject.toml" | cut -d'"' -f2)
 DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
+ZIP_PATH="$DIST_DIR/$APP_NAME-$VERSION.zip"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -89,9 +90,9 @@ if command -v codesign &>/dev/null; then
     codesign -s - --force --deep "$APP_BUNDLE" 2>/dev/null || true
 fi
 
-# 5. Create Drag-and-Drop .dmg Installer via hdiutil with Helper Scripts
+# 5. Create Drag-and-Drop .dmg Installer via hdiutil (Native UDZO with Checksum)
 echo "💿 Generating macOS installer disk image ($DMG_PATH)..."
-DMG_STAGING="$DIST_DIR/dmg_staging"
+DMG_STAGING="$DIST_DIR/$APP_NAME"
 rm -rf "$DMG_STAGING"
 mkdir -p "$DMG_STAGING"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
@@ -152,16 +153,28 @@ Buono studio con Linguo! 🚀
 ======================================================
 EOF
 
-rm -f "$DMG_PATH"
-hdiutil makehybrid -o "$DMG_PATH" "$DMG_STAGING" -hfs >/dev/null
+RAW_DMG="$DIST_DIR/raw_hybrid.dmg"
+rm -f "$RAW_DMG" "$DMG_PATH"
+hdiutil makehybrid -o "$RAW_DMG" "$DMG_STAGING" -hfs -default-volume-name "$APP_NAME" >/dev/null
+hdiutil convert "$RAW_DMG" -format UDZO -o "$DMG_PATH" -ov >/dev/null
+rm -f "$RAW_DMG"
 rm -rf "$DMG_STAGING"
+
+echo "🔍 Verifying DMG integrity..."
+hdiutil verify "$DMG_PATH" >/dev/null
+
+# 6. Create Standalone .zip Archive for 1-Click Unpacking (Zero Disk Mounting)
+echo "📦 Generating standalone .zip archive ($ZIP_PATH)..."
+rm -f "$ZIP_PATH"
+ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
 
 echo ""
 echo "🎉 SUCCESS! macOS Release packaged:"
 echo "   📱 Application Bundle : $APP_BUNDLE"
 echo "   💿 Drag & Drop .dmg  : $DMG_PATH"
+echo "   📦 Standalone .zip   : $ZIP_PATH"
 echo ""
 echo "👉 Per la tua ragazza / utenti non-terminal:"
-echo "   1. Fai doppio clic su $(basename "$DMG_PATH")"
-echo "   2. Fai doppio clic su 'Installa_Linguo.command' oppure trascina Linguo in Applicazioni"
-echo "   3. L'applicazione si avvia all'istante con 15 carte e audio neurale!"
+echo "   Opzione A (.zip): Fai doppio clic su $(basename "$ZIP_PATH") -> estrae subito Linguo.app in Download."
+echo "   Opzione B (.dmg): Fai doppio clic su $(basename "$DMG_PATH") -> doppio clic su 'Installa_Linguo.command'."
+echo "   L'applicazione si avvia all'istante con 15 carte e audio neurale!"
