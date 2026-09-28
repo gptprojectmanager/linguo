@@ -136,6 +136,7 @@ async def telemetry_and_tracing_middleware(request: Request, call_next):
 class CoachRequest(BaseModel):
     phrase: str = Field(..., min_length=1, description="English phrase to analyze")
     mode: Optional[str] = Field("fast", description="Analysis profile: 'fast' (zero-tools) or 'full'")
+    model: Optional[str] = Field("gemini-3.7-flash-low", description="Model identifier for inference")
 
 class AuditSample(BaseModel):
     original: str
@@ -219,7 +220,7 @@ def health_liveness():
         "status": "ok",
         "service": "linguo-remote-backend",
         "host": "sam7670",
-        "engine": "gemini-3.6-flash-low",
+        "engine": "gemini-3.7-flash-low",
         "agent": "linguo-fast",
         "version": "0.3.3"
     }
@@ -248,7 +249,7 @@ def health_readiness():
             "agy_binary": agy_present,
             "workspace_writable": workspace_writable
         },
-        "engine": "gemini-3.6-flash-low",
+        "engine": "gemini-3.7-flash-low",
         "audit_engine": "gemini-3.8-flash-high"
     }
     if not is_ready:
@@ -269,10 +270,15 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
     workspace = WORKSPACE_DIR
     workspace.mkdir(parents=True, exist_ok=True)
 
+    # Route legacy or empty model to gemini-3.7-flash-low for lightning-fast sub-5s response
+    target_model = req.model or "gemini-3.7-flash-low"
+    if target_model in ("gemini-3.6-flash-low", "default", ""):
+        target_model = "gemini-3.7-flash-low"
+
     cmd = [
         str(agy_bin),
         "--agent", "linguo-fast",
-        "--model", "gemini-3.6-flash-low",
+        "--model", target_model,
         "--dangerously-skip-permissions",
         "--disable-slash-commands",
         "--effort", "low",
@@ -287,20 +293,20 @@ def coach_phrase(req: CoachRequest, authenticated: bool = Depends(verify_token))
             cwd=str(workspace),
             capture_output=True,
             text=True,
-            timeout=30.0,
+            timeout=45.0,
             check=True
         )
         infer_duration = time.perf_counter() - t_infer
         if PROMETHEUS_AVAILABLE:
-            INFERENCE_LATENCY.labels(endpoint="/coach", model="gemini-3.6-flash-low").observe(infer_duration)
-            ESTIMATED_TOKENS.labels(model="gemini-3.6-flash-low", type="input").inc(max(1, len(phrase.split()) * 2))
+            INFERENCE_LATENCY.labels(endpoint="/coach", model=target_model).observe(infer_duration)
+            ESTIMATED_TOKENS.labels(model=target_model, type="input").inc(max(1, len(phrase.split()) * 2))
 
         outer = json.loads(res.stdout)
         raw_response = outer.get("response", "").strip()
         cleaned = clean_json_text(raw_response)
         parsed = json.loads(cleaned)
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="AGY inference timed out (>30s)")
+        raise HTTPException(status_code=504, detail="AGY inference timed out (>45s)")
     except subprocess.CalledProcessError as e:
         err = e.stderr or e.stdout
         raise HTTPException(status_code=500, detail=f"AGY process error: {err[:200]}")

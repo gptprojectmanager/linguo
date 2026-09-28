@@ -52,7 +52,7 @@ pub struct LinguoConfig {
     pub hotkey: String,
 }
 
-fn default_model() -> String { "gemini-3.6-flash-low".to_string() }
+fn default_model() -> String { "gemini-3.7-flash-low".to_string() }
 fn default_card_model() -> String { "gemini-3.8-flash-high".to_string() }
 fn default_tts_engine() -> String { "hybrid".to_string() }
 fn default_speed() -> f32 { 0.8 }
@@ -397,7 +397,7 @@ impl LinguoGuiApp {
                     "-H".to_string(), format!("Authorization: Bearer {}", token),
                     "-H".to_string(), format!("X-Trace-Id: {}", trace_id),
                     "-d".to_string(), payload,
-                    "--max-time".to_string(), "35".to_string(),
+                    "--max-time".to_string(), "50".to_string(),
                 ];
                 if endpoint.contains("linguo.princyx.xyz") {
                     curl_args.push("--doh-url".to_string());
@@ -849,7 +849,7 @@ impl eframe::App for LinguoGuiApp {
                     // 1. Real-Time Coach Model (Inference Brain)
                     ui.label(RichText::new("1. Real-Time Coach Model (Inference Brain)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.6-flash-low".to_string(), "⚡ Fast 3.6 Low").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-low".to_string(), "⚡ Lightning 3.7 Low").clicked();
                         changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced 3.7").clicked();
                         changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "🧠 Deep 3.8 Pro").clicked();
                     });
@@ -1322,7 +1322,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let cfg = LinguoConfig::default();
-        assert_eq!(cfg.model, "gemini-3.6-flash-low");
+        assert_eq!(cfg.model, "gemini-3.7-flash-low");
         assert_eq!(cfg.card_model, "gemini-3.8-flash-high");
         assert_eq!(cfg.tts_engine, "hybrid");
         assert_eq!(cfg.speed, 0.8);
