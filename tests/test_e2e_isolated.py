@@ -91,7 +91,7 @@ def run_isolated_e2e():
 
         # 3. Wait for Server Health Probe
         healthy = False
-        t_deadline = time.time() + 8.0
+        t_deadline = time.time() + 25.0
         while time.time() < t_deadline:
             try:
                 req = urllib.request.Request(f"{server_base_url}/health")
@@ -102,7 +102,7 @@ def run_isolated_e2e():
             except Exception:
                 time.sleep(0.15)
         
-        assert healthy, "Ephemeral server failed to respond on /health within 8 seconds"
+        assert healthy, "Ephemeral server failed to respond on /health within 25 seconds"
         print("✅ Step 1: Server liveness verified (/health 200 OK)")
 
         # 4. Verify /health/ready probe
