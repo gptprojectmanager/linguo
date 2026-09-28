@@ -15,22 +15,41 @@ DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
+BUILD_UNIVERSAL=false
+if [[ "${1:-}" == "--universal" ]] || [[ "${CI:-}" == "true" ]] || [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    BUILD_UNIVERSAL=true
+fi
+
 echo "📦 Packaging Linguo for macOS (Non-Technical User Release)..."
 
-# 1. Compile Release Binary
-echo "🦀 Compiling release binary in gui/dash-gui..."
-cargo build --release --manifest-path "$SCRIPT_DIR/gui/dash-gui/Cargo.toml"
-
-# 2. Prepare .app Bundle Structure
+# 1. Compile Binary (Universal 2 or Host Native)
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Resources/audio"
 
-# 3. Copy Executable
-cp "$SCRIPT_DIR/gui/dash-gui/target/release/dash-gui" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+if [ "$BUILD_UNIVERSAL" = true ]; then
+    echo "🦀 Building Universal 2 Binary (x86_64 Intel + aarch64 Apple Silicon)..."
+    rustup target add x86_64-apple-darwin aarch64-apple-darwin 2>/dev/null || true
+    cargo build --release --target x86_64-apple-darwin --manifest-path "$SCRIPT_DIR/gui/dash-gui/Cargo.toml"
+    cargo build --release --target aarch64-apple-darwin --manifest-path "$SCRIPT_DIR/gui/dash-gui/Cargo.toml"
+    lipo -create -output "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+        "$SCRIPT_DIR/gui/dash-gui/target/x86_64-apple-darwin/release/dash-gui" \
+        "$SCRIPT_DIR/gui/dash-gui/target/aarch64-apple-darwin/release/dash-gui"
+else
+    echo "🦀 Compiling host native release binary in gui/dash-gui..."
+    cargo build --release --manifest-path "$SCRIPT_DIR/gui/dash-gui/Cargo.toml"
+    cp "$SCRIPT_DIR/gui/dash-gui/target/release/dash-gui" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+fi
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# 4. Generate Info.plist
+# 2. Bundle Offline Neural Audio Files for 15 Starter Cards
+if [ -d "$HOME/.local/share/linguo/audio" ]; then
+    echo "🎵 Bundling offline neural audio for 15 starter deck cards..."
+    cp "$HOME/.local/share/linguo/audio"/eng_card_*.mp3 "$APP_BUNDLE/Contents/Resources/audio/" 2>/dev/null || true
+    cp "$HOME/.local/share/linguo/audio"/thai_card_*.mp3 "$APP_BUNDLE/Contents/Resources/audio/" 2>/dev/null || true
+fi
+
+# 3. Generate Info.plist
 cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -64,13 +83,13 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 </plist>
 EOF
 
-# 5. Ad-hoc Codesigning
+# 4. Ad-hoc Codesigning
 if command -v codesign &>/dev/null; then
     echo "🔏 Applying ad-hoc codesignature to $APP_NAME.app..."
     codesign -s - --force --deep "$APP_BUNDLE" 2>/dev/null || true
 fi
 
-# 6. Create Drag-and-Drop .dmg Installer via hdiutil
+# 5. Create Drag-and-Drop .dmg Installer via hdiutil with Helper Scripts
 echo "💿 Generating macOS installer disk image ($DMG_PATH)..."
 DMG_STAGING="$DIST_DIR/dmg_staging"
 rm -rf "$DMG_STAGING"
@@ -78,7 +97,63 @@ mkdir -p "$DMG_STAGING"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH" >/dev/null
+# Add 1-Click Installer script for non-technical users (clears Gatekeeper quarantine automatically)
+cat << 'EOF' > "$DMG_STAGING/Installa_Linguo.command"
+#!/bin/bash
+clear
+echo "======================================================"
+echo "   🎮 LINGUO // Installazione Automatica per macOS    "
+echo "======================================================"
+echo ""
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "📦 1. Installazione di Linguo in /Applications..."
+rm -rf /Applications/Linguo.app
+cp -R "$DIR/Linguo.app" /Applications/
+
+echo "🔓 2. Sblocco autorizzazioni di sicurezza Gatekeeper..."
+find /Applications/Linguo.app -exec xattr -c {} + 2>/dev/null || true
+
+echo ""
+echo "🎉 INSTALLAZIONE COMPLETATA CON SUCCESSO!"
+echo "🚀 Avvio di Linguo in corso..."
+sleep 1
+open /Applications/Linguo.app
+
+echo ""
+echo "Puoi chiudere questa finestra del Terminale."
+exit 0
+EOF
+chmod +x "$DMG_STAGING/Installa_Linguo.command"
+
+# Add friendly instructions file
+cat << 'EOF' > "$DMG_STAGING/LEGGIMI_PRIMA.txt"
+======================================================
+  🎮 LINGUO // BENVENUTA! GUIDA DI INSTALLAZIONE
+======================================================
+
+Hai 2 modi semplicissimi per installare Linguo:
+
+METODO 1 (IL PIÙ VELOCE - UN SOLO CLIC):
+  • Fai doppio clic sul file "Installa_Linguo.command".
+  • Fa tutto lui in automatico: installa l'app in Applicazioni,
+    sblocca i permessi e avvia Linguo istantaneamente!
+
+METODO 2 (TRASCINA E RILASCIA):
+  1. Trascina l'icona "Linguo" nella cartella "Applications".
+  2. SOLO PER LA PRIMA VOLTA che apri l'app:
+     - Vai nella cartella Applicazioni del tuo Mac.
+     - Fai clic con il TASTO DESTRO del mouse (o due dita sul trackpad) su Linguo.
+     - Clicca su "Apri" dal menu.
+     - Nella finestrella di avviso, clicca sul pulsante "Apri".
+  3. Dalle volte successive basterà un normale doppio clic!
+
+Buono studio con Linguo! 🚀
+======================================================
+EOF
+
+rm -f "$DMG_PATH"
+hdiutil makehybrid -o "$DMG_PATH" "$DMG_STAGING" -hfs >/dev/null
 rm -rf "$DMG_STAGING"
 
 echo ""
@@ -88,5 +163,5 @@ echo "   💿 Drag & Drop .dmg  : $DMG_PATH"
 echo ""
 echo "👉 Per la tua ragazza / utenti non-terminal:"
 echo "   1. Fai doppio clic su $(basename "$DMG_PATH")"
-echo "   2. Trascina Linguo.app in /Applications"
-echo "   3. Aprilo con doppio clic: la HUD arcade 16-bit si avvia istantaneamente!"
+echo "   2. Fai doppio clic su 'Installa_Linguo.command' oppure trascina Linguo in Applicazioni"
+echo "   3. L'applicazione si avvia all'istante con 15 carte e audio neurale!"

@@ -6,6 +6,26 @@ use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+const STARTER_DECK_JSON: &str = include_str!("starter_deck.json");
+
+#[derive(Deserialize, Debug)]
+struct StarterCardJson {
+    category: String,
+    sprite: String,
+    title: String,
+    cefr: String,
+    #[serde(rename = "type")]
+    card_type: String,
+    front_challenge: String,
+    back_solution: String,
+    rule: String,
+    gag: String,
+    thai_script: String,
+    thai_phonetic: String,
+    thai_tones: String,
+    thai_breakdown: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LinguoConfig {
     #[serde(default = "default_model")]
@@ -168,6 +188,7 @@ impl LinguoGuiApp {
         cc.egui_ctx.set_fonts(fonts);
 
         let db_path = get_db_path();
+        ensure_database_initialized(&db_path);
         let (tx, rx) = channel();
         let mut app = Self {
             cards: Vec::new(),
@@ -280,12 +301,25 @@ impl LinguoGuiApp {
                         }
                     }
                     if !played {
+                        if let Ok(exe) = std::env::current_exe() {
+                            if let Some(res) = exe.parent().and_then(|p| p.parent()).map(|p| p.join(format!("Resources/audio/eng_card_{}.mp3", card_id))) {
+                                if res.exists() {
+                                    let _ = Command::new("afplay").arg(&res).status();
+                                    played = true;
+                                }
+                            }
+                        }
+                    }
+                    if !played {
                         let say_voice = match voice.as_str() {
                             "Alex" | "am_adam" => "Alex",
                             _ => "Samantha",
                         };
                         let rate = (175.0 * speed).round() as i32;
-                        let _ = Command::new("say").args(["-v", say_voice, "-r", &rate.to_string(), &solution_text]).status();
+                        let status = Command::new("say").args(["-v", say_voice, "-r", &rate.to_string(), &solution_text]).status();
+                        if status.is_err() || !status.unwrap().success() {
+                            let _ = Command::new("say").args(["-r", &rate.to_string(), &solution_text]).status();
+                        }
                     }
 
                 });
@@ -301,14 +335,30 @@ impl LinguoGuiApp {
 
                 std::thread::spawn(move || {
                     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                    let cache_dir = PathBuf::from(home).join(".local/share/linguo/cache/thai");
+                    let cache_dir = PathBuf::from(&home).join(".local/share/linguo/cache/thai");
                     let hash = format!("{:x}", md5::compute(format!("{}_0.8", thai_text.trim()).as_bytes()));
                     let cached_file = cache_dir.join(format!("{}.mp3", hash));
 
                     if cached_file.exists() {
                         let _ = Command::new("afplay").arg(&cached_file).status();
                     } else {
-                        let _ = Command::new("say").args(["-v", "Kanya", "-r", "150", &thai_text]).status();
+                        let direct_card = PathBuf::from(&home).join(format!(".local/share/linguo/audio/thai_card_{}.mp3", card_id));
+                        if direct_card.exists() {
+                            let _ = Command::new("afplay").arg(&direct_card).status();
+                        } else {
+                            let mut played = false;
+                            if let Ok(exe) = std::env::current_exe() {
+                                if let Some(res) = exe.parent().and_then(|p| p.parent()).map(|p| p.join(format!("Resources/audio/thai_card_{}.mp3", card_id))) {
+                                    if res.exists() {
+                                        let _ = Command::new("afplay").arg(&res).status();
+                                        played = true;
+                                    }
+                                }
+                            }
+                            if !played {
+                                let _ = Command::new("say").args(["-v", "Kanya", "-r", "150", &thai_text]).status();
+                            }
+                        }
                     }
                 });
             }
@@ -339,17 +389,22 @@ impl LinguoGuiApp {
                 }).to_string();
 
                 let trace_id = format!("trc-gui-{:x}", md5::compute(format!("{}_{}", phrase, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0))));
+                let mut curl_args = vec![
+                    "-s".to_string(),
+                    "-X".to_string(), "POST".to_string(),
+                    endpoint.clone(),
+                    "-H".to_string(), "Content-Type: application/json".to_string(),
+                    "-H".to_string(), format!("Authorization: Bearer {}", token),
+                    "-H".to_string(), format!("X-Trace-Id: {}", trace_id),
+                    "-d".to_string(), payload,
+                    "--max-time".to_string(), "35".to_string(),
+                ];
+                if endpoint.contains("linguo.princyx.xyz") {
+                    curl_args.push("--doh-url".to_string());
+                    curl_args.push("https://cloudflare-dns.com/dns-query".to_string());
+                }
                 let res = Command::new("curl")
-                    .args([
-                        "-s",
-                        "-X", "POST",
-                        &endpoint,
-                        "-H", "Content-Type: application/json",
-                        "-H", &format!("Authorization: Bearer {}", token),
-                        "-H", &format!("X-Trace-Id: {}", trace_id),
-                        "-d", &payload,
-                        "--max-time", "35",
-                    ])
+                    .args(&curl_args)
                     .output();
 
                 match res {
@@ -387,7 +442,7 @@ impl LinguoGuiApp {
                                 let _ = tx.send((true, format!("✅ Analizzato via Dell 7670 ({:.1}s): \"{}\"", timing_sec, phrase)));
                             }
                             Err(e) => {
-                                let _ = tx.send((false, format!("⚠️ Risposta server: {} ({})", out_str.lines().next().unwrap_or(""), e)));
+                                let _ = tx.send((false, format!("⚠️ Risposta server non valida: {}", e)));
                             }
                         }
                     }
@@ -399,12 +454,13 @@ impl LinguoGuiApp {
                 // 2. LOCAL CLI COACH MODE (Mac locale con Python e binario linguo)
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
                 let bin_path = PathBuf::from(&home).join(".local/bin/linguo");
-                let cmd = if bin_path.exists() {
+                let has_local_bin = bin_path.exists();
+                let cmd = if has_local_bin {
                     bin_path.to_string_lossy().to_string()
                 } else {
                     "linguo".to_string()
                 };
-                let res = Command::new(cmd).arg(&phrase).output();
+                let res = Command::new(&cmd).arg(&phrase).output();
                 match res {
                     Ok(output) => {
                         if output.status.success() {
@@ -416,7 +472,12 @@ impl LinguoGuiApp {
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send((false, format!("⚠️ Impossibile avviare il coach: {}", e)));
+                        let msg = if !has_local_bin {
+                            "📡 Connessione internet assente o server non raggiungibile. Connettiti a internet per analizzare nuove frasi!".to_string()
+                        } else {
+                            format!("⚠️ Impossibile avviare il coach: {}", e)
+                        };
+                        let _ = tx.send((false, msg));
                     }
                 }
             }
@@ -922,7 +983,102 @@ fn get_db_path() -> PathBuf {
     }
 }
 
+fn ensure_database_initialized(db_path: &Path) {
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+        let audio_dir = parent.join("audio");
+        let _ = std::fs::create_dir_all(&audio_dir);
+
+        // Copy bundled audio resources into ~/.local/share/linguo/audio if not already there
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(bundle_res) = exe_path.parent().and_then(|p| p.parent()).map(|p| p.join("Resources/audio")) {
+                if bundle_res.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(bundle_res) {
+                        for entry in entries.flatten() {
+                            let src = entry.path();
+                            if src.is_file() {
+                                if let Some(file_name) = src.file_name() {
+                                    let dest = audio_dir.join(file_name);
+                                    if !dest.exists() {
+                                        let _ = std::fs::copy(&src, &dest);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(conn) = Connection::open(db_path) {
+        let _ = conn.execute_batch("
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                original_text TEXT NOT NULL,
+                is_correct INTEGER NOT NULL,
+                corrected_english TEXT NOT NULL,
+                grammar_tip TEXT,
+                thai_script TEXT NOT NULL,
+                thai_phonetic TEXT NOT NULL,
+                thai_breakdown TEXT,
+                audio_thai_path TEXT,
+                audio_eng_path TEXT,
+                english_level TEXT,
+                english_better_alternative TEXT,
+                pronunciation_tip TEXT,
+                thai_grammar_tip TEXT,
+                is_starred INTEGER DEFAULT 0,
+                error_category TEXT
+            );
+            CREATE TABLE IF NOT EXISTS cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                error_category TEXT NOT NULL,
+                sprite_name TEXT NOT NULL,
+                card_title TEXT NOT NULL,
+                cefr_level TEXT DEFAULT 'B1',
+                card_type TEXT NOT NULL,
+                front_challenge TEXT NOT NULL,
+                back_solution TEXT NOT NULL,
+                british_council_rule TEXT NOT NULL,
+                gag_quote TEXT,
+                thai_script TEXT NOT NULL,
+                thai_phonetic TEXT NOT NULL,
+                thai_tones TEXT NOT NULL,
+                thai_breakdown TEXT,
+                source_history_ids TEXT,
+                is_mastered INTEGER DEFAULT 0
+            );
+        ");
+
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0)).unwrap_or(0);
+        if count == 0 {
+            if let Ok(cards) = serde_json::from_str::<Vec<StarterCardJson>>(STARTER_DECK_JSON) {
+                for c in cards {
+                    let _ = conn.execute(
+                        "INSERT INTO cards (
+                            error_category, sprite_name, card_title, cefr_level, card_type,
+                            front_challenge, back_solution, british_council_rule, gag_quote,
+                            thai_script, thai_phonetic, thai_tones, thai_breakdown,
+                            source_history_ids, is_mastered
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '', 0)",
+                        params![
+                            c.category, c.sprite, c.title, c.cefr, c.card_type,
+                            c.front_challenge, c.back_solution, c.rule, c.gag,
+                            c.thai_script, c.thai_phonetic, c.thai_tones, c.thai_breakdown
+                        ],
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn load_cards_from_db(db_path: &Path) -> Result<Vec<LinguoCard>, rusqlite::Error> {
+    ensure_database_initialized(db_path);
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT id, created_at, error_category, sprite_name, card_title, cefr_level, \
@@ -997,9 +1153,14 @@ fn get_remote_coach_config(cfg: &LinguoConfig) -> Option<(String, String)> {
         }
     }
 
-    // 3. Tier 2: Check Cloudflare Tunnel Public Subdomain (works anywhere in the world, e.g. Portugal)
+    // 3. Tier 2: Check Cloudflare Tunnel Public Subdomain with DoH (works anywhere in the world, e.g. Portugal)
     let cf_check = Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "2", "https://linguo.princyx.xyz/health"])
+        .args([
+            "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "--doh-url", "https://cloudflare-dns.com/dns-query",
+            "--max-time", "4",
+            "https://linguo.princyx.xyz/health"
+        ])
         .output();
     if let Ok(out) = cf_check {
         let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -1022,13 +1183,8 @@ fn get_remote_coach_config(cfg: &LinguoConfig) -> Option<(String, String)> {
         }
     }
 
-    // If dispatch_mode is explicitly forced to "dell", return Dell tunnel URL even if health probe timed out
-    if cfg.dispatch_mode == "dell" {
-        return Some(("https://linguo.princyx.xyz".to_string(), token));
-    }
-
-    // 5. Tier 3: None found -> falls back to local linguo CLI!
-    None
+    // Default: for any non-local mode, route to Cloudflare tunnel so non-technical users always connect!
+    Some(("https://linguo.princyx.xyz".to_string(), token))
 }
 
 fn save_remote_analysis_to_db(db_path: &Path, original_phrase: &str, ana: &RemoteAnalysis) -> Result<(), rusqlite::Error> {
@@ -1224,6 +1380,24 @@ mod tests {
         cfg.dispatch_mode = "local".to_string();
         let res = get_remote_coach_config(&cfg);
         assert!(res.is_none(), "Local dispatch mode should immediately return None without network calls");
+    }
+
+    #[test]
+    fn test_cold_start_db_init_and_seeding() {
+        let temp_dir = std::env::temp_dir().join(format!("linguo_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path = temp_dir.join("test_history.db");
+
+        // Ensure database initialized creates tables and seeds starter deck
+        ensure_database_initialized(&db_path);
+
+        let cards = load_cards_from_db(&db_path).expect("Failed to load cards");
+        assert_eq!(cards.len(), 15, "Cold start must seed exactly 15 canonical starter cards");
+        assert_eq!(cards[0].error_category, "ARTICLES");
+        assert_eq!(cards[0].sprite_name, "market_stamp");
+        assert_eq!(cards[0].card_title, "THE MARKET STAMP");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
 

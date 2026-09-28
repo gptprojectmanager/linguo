@@ -22,11 +22,13 @@ jobs:
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
 
-      - name: Build and Package DMG
+      - name: Build and Package Universal DMG
         run: |
           chmod +x scripts/bundle_dmg.sh
-          ./scripts/bundle_dmg.sh
+          ./scripts/bundle_dmg.sh --universal
 
       - name: Extract Release Notes from CHANGELOG.md
         id: release_notes
