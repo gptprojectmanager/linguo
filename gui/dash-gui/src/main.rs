@@ -171,7 +171,7 @@ struct LinguoGuiApp {
 
 impl LinguoGuiApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Setup retro arcade fonts with Thai support
+        // Setup retro arcade fonts with Thai support and Unicode symbols
         let mut fonts = egui::FontDefinitions::default();
         if let Ok(font_bytes) = std::fs::read("/System/Library/Fonts/Supplemental/Ayuthaya.ttf") {
             fonts.font_data.insert(
@@ -183,6 +183,30 @@ impl LinguoGuiApp {
             }
             if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
                 family.insert(0, "ayuthaya".to_owned());
+            }
+        }
+        if let Ok(sym_bytes) = std::fs::read("/System/Library/Fonts/Apple Symbols.ttf") {
+            fonts.font_data.insert(
+                "apple_symbols".to_owned(),
+                egui::FontData::from_owned(sym_bytes),
+            );
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+                family.push("apple_symbols".to_owned());
+            }
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+                family.push("apple_symbols".to_owned());
+            }
+        }
+        if let Ok(arial_bytes) = std::fs::read("/System/Library/Fonts/Supplemental/Arial Unicode.ttf") {
+            fonts.font_data.insert(
+                "arial_unicode".to_owned(),
+                egui::FontData::from_owned(arial_bytes),
+            );
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+                family.push("arial_unicode".to_owned());
+            }
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+                family.push("arial_unicode".to_owned());
             }
         }
         cc.egui_ctx.set_fonts(fonts);
@@ -250,9 +274,9 @@ impl LinguoGuiApp {
                 let _ = set_card_mastered_in_db(&self.db_path, card.id, new_val);
                 let title = card.card_title.clone();
                 status_to_set = Some(if new_val {
-                    format!("🏆 Mastered: {}", title)
+                    format!("★ Mastered: {}", title)
                 } else {
-                    format!("Active again: {}", title)
+                    format!("↺ Active again: {}", title)
                 });
             }
         }
@@ -368,7 +392,7 @@ impl LinguoGuiApp {
     fn coach_phrase(&mut self) {
         let phrase = self.input_phrase.trim().to_string();
         if phrase.is_empty() {
-            self.set_status("⚠️ Scrivi una frase in inglese da verificare!");
+            self.set_status("⚠ Scrivi una frase in inglese da verificare!");
             return;
         }
         self.is_coaching = true;
@@ -439,15 +463,15 @@ impl LinguoGuiApp {
                                 }
 
                                 let timing_sec = resp.timing_ms / 1000.0;
-                                let _ = tx.send((true, format!("✅ Analizzato via Dell 7670 ({:.1}s): \"{}\"", timing_sec, phrase)));
+                                let _ = tx.send((true, format!("✓ Analizzato via Dell 7670 ({:.1}s): \"{}\"", timing_sec, phrase)));
                             }
                             Err(e) => {
-                                let _ = tx.send((false, format!("⚠️ Risposta server non valida: {}", e)));
+                                let _ = tx.send((false, format!("⚠ Risposta server non valida: {}", e)));
                             }
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send((false, format!("⚠️ Connessione remota fallita: {}", e)));
+                        let _ = tx.send((false, format!("⚠ Connessione remota fallita: {}", e)));
                     }
                 }
             } else {
@@ -464,18 +488,18 @@ impl LinguoGuiApp {
                 match res {
                     Ok(output) => {
                         if output.status.success() {
-                            let _ = tx.send((true, format!("✅ Analisi locale completata: \"{}\"", phrase)));
+                            let _ = tx.send((true, format!("✓ Analisi locale completata: \"{}\"", phrase)));
                         } else {
                             let err = String::from_utf8_lossy(&output.stderr);
                             let first_line = err.lines().next().unwrap_or("Errore");
-                            let _ = tx.send((false, format!("⚠️ Errore Coach: {}", first_line)));
+                            let _ = tx.send((false, format!("⚠ Errore Coach: {}", first_line)));
                         }
                     }
                     Err(e) => {
                         let msg = if !has_local_bin {
-                            "📡 Connessione internet assente o server non raggiungibile. Connettiti a internet per analizzare nuove frasi!".to_string()
+                            "⚠ Connessione internet assente o server non raggiungibile. Connettiti a internet per analizzare nuove frasi!".to_string()
                         } else {
-                            format!("⚠️ Impossibile avviare il coach: {}", e)
+                            format!("⚠ Impossibile avviare il coach: {}", e)
                         };
                         let _ = tx.send((false, msg));
                     }
@@ -535,7 +559,7 @@ impl eframe::App for LinguoGuiApp {
                 self.is_pinned = !self.is_pinned;
                 let level = if self.is_pinned { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
-                let status = if self.is_pinned { "📌 Window pinned always-on-top" } else { "📍 Window unpinned" };
+                let status = if self.is_pinned { "⚑ Window pinned always-on-top" } else { "⚐ Window unpinned" };
                 self.set_status(status);
             }
             if i.key_pressed(egui::Key::C) {
@@ -558,21 +582,21 @@ impl eframe::App for LinguoGuiApp {
             .show(ctx, |ui| {
                 // Header Bar
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new("🎮 LINGUO // ARCADE DECK").color(gold).strong());
+                    ui.heading(RichText::new("◆ LINGUO // ARCADE DECK").color(gold).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let pin_lbl = if self.is_pinned { "📌 Pinned" } else { "📍 Pin (P)" };
+                        let pin_lbl = if self.is_pinned { "⚑ Pinned" } else { "⚐ Pin (P)" };
                         if ui.button(RichText::new(pin_lbl).color(if self.is_pinned { gold } else { Color32::GRAY })).clicked() {
                             self.is_pinned = !self.is_pinned;
                             let level = if self.is_pinned { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
                             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
-                            let status = if self.is_pinned { "📌 Window pinned always-on-top" } else { "📍 Window unpinned" };
+                            let status = if self.is_pinned { "⚑ Window pinned always-on-top" } else { "⚐ Window unpinned" };
                             self.set_status(status);
                         }
-                        if ui.button("🔄 Reload").clicked() {
+                        if ui.button("↻ Reload").clicked() {
                             self.reload_cards();
                         }
                         let cfg_color = if self.show_config_modal { gold } else { Color32::WHITE };
-                        if ui.button(RichText::new("⚙️ Config (C)").color(cfg_color)).clicked() {
+                        if ui.button(RichText::new("⚙ Config (C)").color(cfg_color)).clicked() {
                             self.show_config_modal = !self.show_config_modal;
                         }
                         if ui.checkbox(&mut self.show_mastered, "Show Mastered").changed() {
@@ -593,7 +617,7 @@ impl eframe::App for LinguoGuiApp {
                     .inner_margin(10.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("💬").size(22.0));
+                            ui.label(RichText::new("►").size(20.0).color(cyan));
                             let edit_width = (ui.available_width() - 120.0).max(120.0);
                             let response = ui.add(
                                 egui::TextEdit::singleline(&mut self.input_phrase)
@@ -601,7 +625,7 @@ impl eframe::App for LinguoGuiApp {
                                     .desired_width(edit_width)
                             );
                             let enter_hit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            let btn_text = if self.is_coaching { "⏳ Analizzo..." } else { "⚡ Coach Me" };
+                            let btn_text = if self.is_coaching { "⚡ Analizzo..." } else { "⚡ Coach Me" };
                             let btn_color = if self.is_coaching { gold } else { neon_green };
                             if (ui.button(RichText::new(btn_text).color(btn_color).strong()).clicked() || enter_hit) && !self.is_coaching {
                                 self.coach_phrase();
@@ -620,7 +644,7 @@ impl eframe::App for LinguoGuiApp {
                         .inner_margin(32.0)
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
-                                ui.heading(RichText::new("🏆 ALL CARDS MASTERED!").color(gold).size(22.0));
+                                ui.heading(RichText::new("★ ALL CARDS MASTERED!").color(gold).size(22.0));
                                 ui.add_space(10.0);
                                 ui.label(RichText::new("No active gaps remaining in this deck.").color(Color32::WHITE));
                                 ui.label(RichText::new("Speak more English via 'linguo' to detect new gaps, or tick 'Show Mastered' to review.").color(Color32::GRAY));
@@ -640,9 +664,9 @@ impl eframe::App for LinguoGuiApp {
                     ui.label(RichText::new(format!("CARD {} OF {}", self.current_index + 1, total_visible)).color(cyan).strong());
                     ui.separator();
                     if current_card.is_mastered {
-                        ui.label(RichText::new("⭐ MASTERED").color(gold).strong());
+                        ui.label(RichText::new("★ MASTERED").color(gold).strong());
                     } else {
-                        ui.label(RichText::new("⚔️ ACTIVE GAP").color(neon_green).strong());
+                        ui.label(RichText::new("⚔ ACTIVE GAP").color(neon_green).strong());
                     }
                     ui.separator();
                     ui.label(RichText::new(format!("CEFR {}", current_card.cefr_level)).color(Color32::LIGHT_GRAY));
@@ -661,12 +685,12 @@ impl eframe::App for LinguoGuiApp {
                     // Card Top Title Bar
                     ui.horizontal(|ui| {
                         let sprite_badge = match current_card.sprite_name.as_str() {
-                            "market_stamp" => "🎫",
+                            "market_stamp" => "◆",
                             "gerund_vest" => "⚓",
-                            "to_toll" => "🪙",
-                            _ => "👾",
+                            "to_toll" => "●",
+                            _ => "■",
                         };
-                        ui.label(RichText::new(sprite_badge).size(26.0));
+                        ui.label(RichText::new(sprite_badge).size(22.0).color(cyan));
                         ui.heading(RichText::new(&current_card.card_title).color(gold).size(20.0).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(RichText::new(&current_card.card_type).color(Color32::GRAY).size(12.0));
@@ -679,7 +703,7 @@ impl eframe::App for LinguoGuiApp {
                     // Card Main Face: FRONT (Challenge) vs BACK (Solution)
                     if !current_card.is_revealed {
                         // FRONT FACE: ACTIVE RECALL PUZZLE
-                        ui.label(RichText::new("⚔️ ACTIVE RECALL CHALLENGE:").color(cyan).strong());
+                        ui.label(RichText::new("⚔ ACTIVE RECALL CHALLENGE:").color(cyan).strong());
                         ui.add_space(4.0);
 
                         egui::Frame::none()
@@ -701,7 +725,7 @@ impl eframe::App for LinguoGuiApp {
                         ui.add_space(8.0);
 
                         ui.vertical_centered(|ui| {
-                            if ui.button(RichText::new("👉 Click or Press [SPACE] to Reveal Solution").color(gold).size(14.0)).clicked() {
+                            if ui.button(RichText::new("▶ Click or Press [SPACE] to Reveal Solution").color(gold).size(14.0)).clicked() {
                                 if let Some(card_id) = self.visible_card_mut_id() {
                                     if let Some(c) = self.cards.iter_mut().find(|c| c.id == card_id) {
                                         c.is_revealed = true;
@@ -711,7 +735,7 @@ impl eframe::App for LinguoGuiApp {
                         });
                     } else {
                         // BACK FACE: SOLUTION & CAMBRIDGE RULE
-                        ui.label(RichText::new("🛡️ BRITISH COUNCIL RECTIFICATION:").color(neon_green).strong());
+                        ui.label(RichText::new("◆ BRITISH COUNCIL RECTIFICATION:").color(neon_green).strong());
                         ui.add_space(4.0);
 
                         egui::Frame::none()
@@ -729,7 +753,7 @@ impl eframe::App for LinguoGuiApp {
                             });
 
                         ui.add_space(8.0);
-                        ui.label(RichText::new("📖 Cambridge / British Council Rule:").color(cyan).strong().size(13.0));
+                        ui.label(RichText::new("§ Cambridge / British Council Rule:").color(cyan).strong().size(13.0));
                         ui.label(RichText::new(&current_card.british_council_rule).color(Color32::LIGHT_GRAY).size(13.0));
 
                         ui.add_space(8.0);
@@ -740,7 +764,7 @@ impl eframe::App for LinguoGuiApp {
                             .rounding(6.0)
                             .inner_margin(10.0)
                             .show(ui, |ui| {
-                                ui.label(RichText::new("🎭 16-bit Arcade Gag:").color(gag_amber).strong().size(12.0));
+                                ui.label(RichText::new("✦ 16-bit Arcade Gag:").color(gag_amber).strong().size(12.0));
                                 ui.label(RichText::new(&current_card.gag_quote).color(Color32::from_rgb(255, 230, 200)).italics().size(12.0));
                             });
                     }
@@ -750,7 +774,7 @@ impl eframe::App for LinguoGuiApp {
                     ui.add_space(6.0);
 
                     // DUAL THAI SURVIVAL BRICK
-                    ui.label(RichText::new("🇹🇭 SURVIVAL THAI BRICK (A0):").color(Color32::from_rgb(255, 110, 180)).strong().size(13.0));
+                    ui.label(RichText::new("[TH] SURVIVAL THAI BRICK (A0):").color(Color32::from_rgb(255, 110, 180)).strong().size(13.0));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&current_card.thai_script).color(Color32::WHITE).size(22.0).strong());
                         ui.add_space(8.0);
@@ -768,17 +792,17 @@ impl eframe::App for LinguoGuiApp {
 
                 // AUDIO ACTION TOOLBAR
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("🇬🇧 English Audio (E)").color(Color32::WHITE)).clicked() {
+                    if ui.button(RichText::new("[EN] English Audio (E)").color(Color32::WHITE)).clicked() {
                         self.play_audio_english();
                     }
-                    if ui.button(RichText::new("🇹🇭 Thai Audio (T/R)").color(Color32::WHITE)).clicked() {
+                    if ui.button(RichText::new("[TH] Thai Audio (T/R)").color(Color32::WHITE)).clicked() {
                         self.play_audio_thai();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let master_btn_text = if current_card.is_mastered {
-                            "↩️ Move to Active"
+                            "↺ Move to Active (M)"
                         } else {
-                            "⭐ Mastered (M)"
+                            "★ Mastered (M)"
                         };
                         if ui.button(RichText::new(master_btn_text).color(gold).strong()).clicked() {
                             self.toggle_master();
@@ -790,16 +814,16 @@ impl eframe::App for LinguoGuiApp {
 
                 // NAVIGATION BAR
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("◄ Prev (A)").size(14.0)).clicked() {
+                    if ui.button(RichText::new("◀ Prev (A)").size(14.0)).clicked() {
                         if total_visible > 0 {
                             self.current_index = (self.current_index + total_visible - 1) % total_visible;
                         }
                     }
 
                     let flip_label = if current_card.is_revealed {
-                        "🔄 Show Challenge (Space)"
+                        "↺ Show Challenge (Space)"
                     } else {
-                        "🔄 Show Solution (Space)"
+                        "↺ Show Solution (Space)"
                     };
                     if ui.button(RichText::new(flip_label).size(14.0).color(cyan)).clicked() {
                         if let Some(card_id) = self.visible_card_mut_id() {
@@ -809,7 +833,7 @@ impl eframe::App for LinguoGuiApp {
                         }
                     }
 
-                    if ui.button(RichText::new("Next (D) ►").size(14.0)).clicked() {
+                    if ui.button(RichText::new("Next (D) ▶").size(14.0)).clicked() {
                         if total_visible > 0 {
                             self.current_index = (self.current_index + 1) % total_visible;
                         }
@@ -834,7 +858,7 @@ impl eframe::App for LinguoGuiApp {
             let modal_cyan = Color32::from_rgb(0, 229, 255);
             let modal_green = Color32::from_rgb(74, 222, 128);
 
-            egui::Window::new(RichText::new("⚙️ Linguo Settings & Configuration Matrix").color(modal_gold).strong())
+            egui::Window::new(RichText::new("⚙ Linguo Settings & Configuration Matrix").color(modal_gold).strong())
                 .open(&mut is_open)
                 .resizable(false)
                 .collapsible(false)
@@ -850,8 +874,8 @@ impl eframe::App for LinguoGuiApp {
                     ui.label(RichText::new("1. Real-Time Coach Model (Inference Brain)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-low".to_string(), "⚡ Lightning 3.7 Low").clicked();
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced 3.7").clicked();
-                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "🧠 Deep 3.8 Pro").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.7-flash-medium".to_string(), "⚖ Balanced 3.7").clicked();
+                        changed |= ui.selectable_value(&mut self.config.model, "gemini-3.8-flash-high".to_string(), "◆ Deep 3.8 Pro").clicked();
                     });
                     ui.add_space(8.0);
 
@@ -859,17 +883,17 @@ impl eframe::App for LinguoGuiApp {
                     ui.label(RichText::new("2. Card & Graphic Production (Token Gate)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
                         changed |= ui.selectable_value(&mut self.config.card_model, "canon".to_string(), "⚡ Canonico (0 Token)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.7-flash-medium".to_string(), "⚖️ Balanced (3.7)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.8-flash-high".to_string(), "🔬 Studio Pro (3.8 High)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.7-flash-medium".to_string(), "⚖ Balanced (3.7)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.card_model, "gemini-3.8-flash-high".to_string(), "★ Studio Pro (3.8 High)").clicked();
                     });
                     ui.add_space(8.0);
 
                     // 3. Audio Speech Engine
                     ui.label(RichText::new("3. Speech Engine (TTS Synthesis)").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
-                        changed |= ui.selectable_value(&mut self.config.tts_engine, "hybrid".to_string(), "✨ Hybrid Studio (Kokoro+Edge)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.tts_engine, "local".to_string(), "🔊 100% Offline (macOS Say)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.tts_engine, "edge".to_string(), "☁️ Azure Cloud (Edge-TTS)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "hybrid".to_string(), "★ Hybrid Studio (Kokoro+Edge)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "local".to_string(), "[OFFLINE] 100% Offline (macOS Say)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.tts_engine, "edge".to_string(), "☁ Azure Cloud (Edge-TTS)").clicked();
                     });
                     ui.add_space(8.0);
 
@@ -885,40 +909,40 @@ impl eframe::App for LinguoGuiApp {
                     // 5. Voice Persona & Audio Quality (2 Femminili + 2 Maschili)
                     ui.label(RichText::new("5. English Voice & Quality (2 Femminili + 2 Maschili)").color(modal_cyan).strong());
                     let current_label = match self.config.eng_voice.as_str() {
-                        "af_nicole" => "👩 Nicole  [Studio Neural 24kHz • British Female]",
-                        "Samantha"  => "👩 Samantha  [macOS Built-in • American Female]",
-                        "am_adam"   => "👨 Adam  [Studio Neural 24kHz • American Male]",
-                        "Alex"      => "👨 Alex  [macOS Built-in • American Male]",
-                        _           => "👩 Nicole  [Studio Neural 24kHz • British Female]",
+                        "af_nicole" => "[F] Nicole  [Studio Neural 24kHz • British Female]",
+                        "Samantha"  => "[F] Samantha  [macOS Built-in • American Female]",
+                        "am_adam"   => "[M] Adam  [Studio Neural 24kHz • American Male]",
+                        "Alex"      => "[M] Alex  [macOS Built-in • American Male]",
+                        _           => "[F] Nicole  [Studio Neural 24kHz • British Female]",
                     };
 
                     egui::ComboBox::from_id_salt("eng_voice_dropdown")
                         .width(ui.available_width() - 10.0)
                         .selected_text(RichText::new(current_label).color(Color32::WHITE))
                         .show_ui(ui, |ui| {
-                            ui.label(RichText::new("── 👩 VOCI FEMMINILI ──").size(11.0).color(Color32::GRAY));
+                            ui.label(RichText::new("── [F] VOCI FEMMINILI ──").size(11.0).color(Color32::GRAY));
                             changed |= ui.selectable_value(
                                 &mut self.config.eng_voice,
                                 "af_nicole".to_string(),
-                                "👩 Nicole — Studio Neural 24kHz (Kokoro British Female)",
+                                "[F] Nicole — Studio Neural 24kHz (Kokoro British Female)",
                             ).clicked();
                             changed |= ui.selectable_value(
                                 &mut self.config.eng_voice,
                                 "Samantha".to_string(),
-                                "👩 Samantha — macOS Built-in (Apple System American Female)",
+                                "[F] Samantha — macOS Built-in (Apple System American Female)",
                             ).clicked();
 
                             ui.separator();
-                            ui.label(RichText::new("── 👨 VOCI MASCHILI ──").size(11.0).color(Color32::GRAY));
+                            ui.label(RichText::new("── [M] VOCI MASCHILI ──").size(11.0).color(Color32::GRAY));
                             changed |= ui.selectable_value(
                                 &mut self.config.eng_voice,
                                 "am_adam".to_string(),
-                                "👨 Adam — Studio Neural 24kHz (Kokoro American Male)",
+                                "[M] Adam — Studio Neural 24kHz (Kokoro American Male)",
                             ).clicked();
                             changed |= ui.selectable_value(
                                 &mut self.config.eng_voice,
                                 "Alex".to_string(),
-                                "👨 Alex — macOS Built-in (Apple System American Male)",
+                                "[M] Alex — macOS Built-in (Apple System American Male)",
                             ).clicked();
                         });
                     ui.add_space(8.0);
@@ -926,9 +950,9 @@ impl eframe::App for LinguoGuiApp {
                     // 6. Network Routing Dispatch
                     ui.label(RichText::new("6. Network Routing Dispatch").color(modal_cyan).strong());
                     ui.horizontal(|ui| {
-                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "auto".to_string(), "🌐 Auto Cascade (WG->CF->Mac)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "dell".to_string(), "🖥️ Dell Remote (Force Server)").clicked();
-                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "local".to_string(), "💻 Local Mac (Force Local)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "auto".to_string(), "◆ Auto Cascade (WG->CF->Mac)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "dell".to_string(), "☁ Dell Remote (Force Server)").clicked();
+                        changed |= ui.selectable_value(&mut self.config.dispatch_mode, "local".to_string(), "▶ Local Mac (Force Local)").clicked();
                     });
                     ui.add_space(8.0);
 
@@ -944,7 +968,7 @@ impl eframe::App for LinguoGuiApp {
                     ui.add_space(6.0);
 
                     ui.horizontal(|ui| {
-                        if ui.button(RichText::new("🔄 Ripristina Predefiniti").color(Color32::LIGHT_RED)).clicked() {
+                        if ui.button(RichText::new("↺ Ripristina Predefiniti").color(Color32::LIGHT_RED)).clicked() {
                             self.config = LinguoConfig::default();
                             save_config_to_file(&self.config);
                             self.set_status("Parametri ripristinati ai valori predefiniti");
@@ -953,7 +977,7 @@ impl eframe::App for LinguoGuiApp {
                             if ui.button(RichText::new("Chiudi").color(modal_gold).strong()).clicked() {
                                 close_requested = true;
                             }
-                            if ui.button(RichText::new("💾 Salva").color(modal_green)).clicked() {
+                            if ui.button(RichText::new("✓ Salva").color(modal_green)).clicked() {
                                 save_config_to_file(&self.config);
                                 self.set_status("Configurazione salvata con successo");
                                 close_requested = true;
